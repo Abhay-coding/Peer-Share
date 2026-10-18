@@ -1,1 +1,31 @@
+# Compiled Java output
+out/
+*.class
+
+# SQLite Database
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+peershare.db
+
+# User data & transfer directories
+downloads/*
+!downloads/.gitkeep
+shared_files/*
+!shared_files/.gitkeep
+*.part
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.iml
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Markdown documentation handling
 *.md
+!README.md

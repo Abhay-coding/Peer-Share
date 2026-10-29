@@ -9,15 +9,15 @@ if [ -d "lib" ]; then
       if [ -z "$EXTRA_CP" ]; then
         EXTRA_CP="$jar"
       else
-        EXTRA_CP="$EXTRA_CP:$jar"
+        EXTRA_CP="$EXTRA_CP$CP_SEP$jar"
       fi
     fi
   done
 fi
 
-RUN_CP="out/main:out/test"
+RUN_CP="out/main${CP_SEP}out/test"
 if [ -n "$EXTRA_CP" ]; then
-  RUN_CP="$RUN_CP:$EXTRA_CP"
+  RUN_CP="$RUN_CP$CP_SEP$EXTRA_CP"
 fi
 
 "$JAVA_HOME/bin/java" --enable-native-access=ALL-UNNAMED -cp "$RUN_CP" com.peershare.AllTests

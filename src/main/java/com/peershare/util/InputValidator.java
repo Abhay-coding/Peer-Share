@@ -31,8 +31,16 @@ public final class InputValidator {
     public static boolean isSafeFileName(String fileName) {
         return fileName != null
                 && !fileName.isBlank()
-                && !fileName.contains("..")
+                && !fileName.equals(".")
+                && !fileName.equals("..")
                 && !fileName.contains("/")
-                && !fileName.contains("\\");
+                && !fileName.contains("\\")
+                && !fileName.contains("|")
+                && !fileName.contains(":")
+                && !fileName.matches(".*[<>\"?*].*")
+                && !fileName.matches("(?i)^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\\..*)?$")
+                && !fileName.endsWith(" ")
+                && !fileName.endsWith(".")
+                && fileName.chars().noneMatch(c -> c < 32 || c == 127);
     }
 }

@@ -8,6 +8,8 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Path;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -24,6 +26,7 @@ public final class PeerServer {
 
     private ServerSocket serverSocket;
     private Thread acceptThread;
+    private final Set<Socket> clients = ConcurrentHashMap.newKeySet();
     private volatile boolean running = false;
 
     public PeerServer(int port, Path sharedDirectory) {
@@ -46,22 +49,38 @@ public final class PeerServer {
             return;
         }
 
+        if (acceptThread != null && acceptThread.isAlive()) {
+            throw new IOException("Previous server is still stopping.");
+        }
         serverSocket = new ServerSocket(configuredPort);
         running = true;
 
-        acceptThread = new Thread(this::listenForClients, "PeerServer-AcceptThread");
+        ServerSocket listener = serverSocket;
+        acceptThread = new Thread(() -> listenForClients(listener), "PeerServer-AcceptThread");
         acceptThread.setDaemon(true);
         acceptThread.start();
 
         LOGGER.log(Level.INFO, "PeerServer started on port {0}", port());
     }
 
-    private void listenForClients() {
-        while (running && !serverSocket.isClosed()) {
+    private void listenForClients(ServerSocket listener) {
+        while (running && !listener.isClosed()) {
             try {
-                Socket clientSocket = serverSocket.accept();
+                Socket clientSocket = listener.accept();
+                if (!running) {
+                    clientSocket.close();
+                    break;
+                }
+                clientSocket.setSoTimeout(5000);
+                clients.add(clientSocket);
                 ClientHandler handler = new ClientHandler(clientSocket, sharedDirectory, fileScanner);
-                Thread handlerThread = new Thread(handler, "PeerServer-ClientHandler");
+                Thread handlerThread = new Thread(() -> {
+                    try {
+                        handler.run();
+                    } finally {
+                        clients.remove(clientSocket);
+                    }
+                }, "PeerServer-ClientHandler");
                 handlerThread.setDaemon(true);
                 handlerThread.start();
             } catch (IOException e) {
@@ -96,8 +115,19 @@ public final class PeerServer {
                 LOGGER.log(Level.WARNING, "Error closing server socket: {0}", e.getMessage());
             }
         }
+        for (Socket client : clients) {
+            try {
+                client.close();
+            } catch (IOException e) {
+                LOGGER.log(Level.FINE, "Error closing client socket", e);
+            }
+        }
         if (acceptThread != null) {
-            acceptThread.interrupt();
+            try {
+                acceptThread.join(5000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 }

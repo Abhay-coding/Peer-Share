@@ -4,9 +4,11 @@ import com.peershare.model.Peer;
 import com.peershare.model.SharedFile;
 import com.peershare.network.FileTransferClient;
 import com.peershare.network.PeerServer;
+import com.peershare.network.Protocol;
 
 import java.io.IOException;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -18,6 +20,13 @@ public final class NetworkTransferTest {
     public static void run() throws Exception {
         testRemoteFileList();
         testUnavailablePeerConnectFailure();
+        testInvalidListCount();
+        testMalformedListRow();
+        testExtraDownloadBytes();
+        testTruncatedDownload();
+        testWrongChecksum();
+        testListedSizeChanged();
+        testStopClosesConnectedClient();
     }
 
     private static void testRemoteFileList() throws Exception {
@@ -67,5 +76,120 @@ public final class NetworkTransferTest {
 
         TestSupport.assertTrue(failedAsExpected,
                 "Connecting to an unavailable peer must throw an IOException.");
+    }
+
+    private static void testInvalidListCount() throws Exception {
+        try (ServerSocket server = new ServerSocket(0)) {
+            Thread responder = new Thread(() -> respond(server, "OK -1\n"));
+            responder.start();
+            try {
+                new FileTransferClient().listRemoteFiles(
+                        new Peer(1, "BadPeer", "127.0.0.1", server.getLocalPort()));
+                throw new AssertionError("Negative list count must be rejected.");
+            } catch (IOException expected) {
+                TestSupport.assertTrue(expected.getMessage().contains("Invalid file count"),
+                        "Malformed count must produce a controlled protocol error.");
+            }
+            responder.join();
+        }
+    }
+
+    private static void testExtraDownloadBytes() throws Exception {
+        try (ServerSocket server = new ServerSocket(0)) {
+            Thread responder = new Thread(() -> respond(server,
+                    "OK 3 ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\nabcdef"));
+            responder.start();
+            Path temporary = Files.createTempFile("peershare-extra-", ".part");
+            try {
+                new FileTransferClient().download(
+                        new Peer(1, "BadPeer", "127.0.0.1", server.getLocalPort()),
+                        "notes.txt", temporary, 3);
+                throw new AssertionError("Extra bytes must be rejected.");
+            } catch (IOException expected) {
+                TestSupport.assertTrue(expected.getMessage().contains("more bytes"),
+                        "Extra payload must produce a controlled error.");
+            } finally {
+                Files.deleteIfExists(temporary);
+                responder.join();
+            }
+        }
+    }
+
+    private static void testMalformedListRow() throws Exception {
+        try (ServerSocket server = new ServerSocket(0)) {
+            Thread responder = new Thread(() -> respond(server, "OK 1\nfile.txt|not-a-size|2026-01-01T00:00:00\n"));
+            responder.start();
+            try {
+                new FileTransferClient().listRemoteFiles(
+                        new Peer(1, "BadPeer", "127.0.0.1", server.getLocalPort()));
+                throw new AssertionError("Malformed file row must be rejected.");
+            } catch (IOException expected) {
+                TestSupport.assertTrue(expected.getMessage().contains("Invalid file size"),
+                        "Malformed metadata must produce a controlled error.");
+            } finally {
+                responder.join();
+            }
+        }
+    }
+
+    private static void testTruncatedDownload() throws Exception {
+        expectBadDownload("OK 6 " + "0".repeat(64) + "\nabc",
+                6, "Connection interrupted");
+    }
+
+    private static void testWrongChecksum() throws Exception {
+        expectBadDownload("OK 3 " + "0".repeat(64) + "\nabc", 3, "checksum does not match");
+    }
+
+    private static void testListedSizeChanged() throws Exception {
+        expectBadDownload("OK 3 ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\nabc",
+                4, "File size changed");
+    }
+
+    private static void expectBadDownload(String response, long listedSize, String errorText) throws Exception {
+        try (ServerSocket server = new ServerSocket(0)) {
+            Thread responder = new Thread(() -> respond(server, response));
+            responder.start();
+            Path temporary = Files.createTempFile("peershare-bad-", ".part");
+            try {
+                new FileTransferClient().download(
+                        new Peer(1, "BadPeer", "127.0.0.1", server.getLocalPort()),
+                        "notes.txt", temporary, listedSize);
+                throw new AssertionError("Bad download must be rejected: " + errorText);
+            } catch (IOException expected) {
+                TestSupport.assertTrue(expected.getMessage().contains(errorText),
+                        "Expected controlled error containing: " + errorText + ", actual: " + expected.getMessage());
+            } finally {
+                Files.deleteIfExists(temporary);
+                responder.join();
+            }
+        }
+    }
+
+    private static void testStopClosesConnectedClient() throws Exception {
+        Path shared = Files.createTempDirectory("peershare-stop-shared");
+        PeerServer server = new PeerServer(0, shared);
+        server.start();
+        try (Socket idleClient = new Socket("127.0.0.1", server.port())) {
+            idleClient.setSoTimeout(2000);
+            server.stop();
+            TestSupport.assertEquals(-1, idleClient.getInputStream().read(),
+                    "Stopping the server should close an accepted client.");
+            server.start();
+            Peer peer = new Peer(1, "Restarted", "127.0.0.1", server.port());
+            TestSupport.assertEquals(0, new FileTransferClient().listRemoteFiles(peer).size(),
+                    "Server should answer after restart.");
+        } finally {
+            server.stop();
+        }
+    }
+
+    private static void respond(ServerSocket server, String response) {
+        try (Socket socket = server.accept()) {
+            Protocol.readLine(socket.getInputStream());
+            socket.getOutputStream().write(response.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 }

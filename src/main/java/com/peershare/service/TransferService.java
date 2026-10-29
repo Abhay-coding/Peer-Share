@@ -9,10 +9,8 @@ import com.peershare.util.AppLogger;
 import com.peershare.util.InputValidator;
 
 import java.io.IOException;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.logging.Level;
@@ -21,8 +19,8 @@ import java.util.logging.Logger;
 /**
  * TransferService manages the downloading of files from remote peers.
  * It coordinates with FileTransferClient, writes files to a temporary .part
- * location, finalizes them atomically upon verification, and logs every
- * outcome (SUCCESS or FAILED) into the local SQLite database.
+ * location, moves them into place upon verification, and attempts to log
+ * each outcome (SUCCESS or FAILED) in the local SQLite database.
  */
 public final class TransferService {
     private static final Logger LOGGER = AppLogger.create();
@@ -60,27 +58,34 @@ public final class TransferService {
      * @throws IOException if network transfer fails or file is rejected
      */
     public Path download(Peer peer, String fileName) throws IOException {
-        Files.createDirectories(downloadsDirectory);
+        return download(peer, fileName, -1);
+    }
 
+    /** expectedSize is the size shown in the remote file list, or -1 when no list was used. */
+    public Path download(Peer peer, String fileName, long expectedSize) throws IOException {
+        Path tempFile = null;
+        boolean published = false;
         Path normalizedBase = downloadsDirectory.toAbsolutePath().normalize();
-        Path tempFile = normalizedBase.resolve(fileName + ".part");
-        Path destination = normalizedBase.resolve(fileName).normalize();
 
         try {
-            // Validate filename against path traversal attacks (e.g. ../secret.txt)
-            if (!InputValidator.isSafeFileName(fileName) || !destination.startsWith(normalizedBase)) {
-                throw new IllegalArgumentException("Unsafe or invalid filename: " + fileName);
+            if (peer == null || !InputValidator.isSafeFileName(fileName)) {
+                throw new IOException("Unsafe or invalid download request.");
+            }
+            Files.createDirectories(normalizedBase);
+            Path destination = normalizedBase.resolve(fileName).normalize();
+            if (!destination.startsWith(normalizedBase) || Files.exists(destination)) {
+                throw new IOException("Download already exists: " + fileName);
             }
 
-            // Stream from peer to temporary .part file
-            client.download(peer, fileName, tempFile);
+            // Each attempt owns a unique temporary file. Never delete someone else's file.
+            tempFile = Files.createTempFile(normalizedBase, "peershare-", ".part");
 
-            // Atomically finalize the file so no half-written files exist in downloads
-            try {
-                Files.move(tempFile, destination, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(tempFile, destination, StandardCopyOption.REPLACE_EXISTING);
-            }
+            client.download(peer, fileName, tempFile, expectedSize);
+
+            // Move within the same folder; the default move refuses an existing target.
+            Files.move(tempFile, destination);
+            tempFile = null;
+            published = true;
 
             // Record successful download in SQLite
             recordHistory(fileName, peer.name(), "SUCCESS");
@@ -89,14 +94,22 @@ public final class TransferService {
 
         } catch (Exception e) {
             // Clean up any incomplete .part file
-            try {
-                Files.deleteIfExists(tempFile);
-            } catch (IOException cleanupEx) {
-                LOGGER.log(Level.WARNING, "Failed to clean up temp file: {0}", cleanupEx.getMessage());
+            if (tempFile != null) {
+                try {
+                    Files.deleteIfExists(tempFile);
+                } catch (IOException cleanupEx) {
+                    LOGGER.log(Level.WARNING, "Failed to clean up temp file", cleanupEx);
+                }
             }
 
-            // Record failed download in SQLite
-            recordHistory(fileName, peer.name(), "FAILED");
+            // A published file remains a successful transfer even if history storage fails.
+            if (!published) {
+                try {
+                    recordHistory(fileName, peer == null ? "Unknown" : peer.name(), "FAILED");
+                } catch (IOException historyError) {
+                    e.addSuppressed(historyError);
+                }
+            }
 
             if (e instanceof IOException ioe) {
                 throw ioe;
@@ -108,11 +121,11 @@ public final class TransferService {
         }
     }
 
-    private void recordHistory(String fileName, String peerName, String status) {
+    private void recordHistory(String fileName, String peerName, String status) throws IOException {
         try {
             historyDao.create(new DownloadHistory(0, fileName, peerName, LocalDateTime.now(), status));
         } catch (SQLException e) {
-            LOGGER.log(Level.WARNING, "Could not record download history to database: {0}", e.getMessage());
+            throw new IOException("Transfer finished, but history could not be saved: " + e.getMessage(), e);
         }
     }
 }

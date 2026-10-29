@@ -3,6 +3,7 @@ package com.peershare.service;
 import com.peershare.config.AppConfig;
 import com.peershare.dao.SharedFileDao;
 import com.peershare.model.SharedFile;
+import com.peershare.util.InputValidator;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -58,7 +59,8 @@ public final class FileScanner {
 
             for (Path entry : entries) {
                 // Only include regular files; skip subdirectories
-                if (Files.isRegularFile(entry)) {
+                if (!Files.isSymbolicLink(entry) && Files.isRegularFile(entry)
+                        && InputValidator.isSafeFileName(entry.getFileName().toString())) {
                     String fileName = entry.getFileName().toString();
                     long fileSize = Files.size(entry);
 

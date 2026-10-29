@@ -43,6 +43,7 @@ public final class DownloadTab extends Tab {
 
     private final ProgressIndicator progress = new ProgressIndicator();
     private final Label statusLabel = new Label("Select a peer and click 'View Peer Files'.");
+    private Peer listedPeer;
 
     public DownloadTab(PeerDao peerDao, FileTransferClient client, TransferService transferService) {
         super("Download");
@@ -64,6 +65,12 @@ public final class DownloadTab extends Tab {
 
         // Peer Selector Configuration
         peerSelector.setItems(peerList);
+        peerSelector.valueProperty().addListener((obs, oldPeer, newPeer) -> {
+            listedPeer = null;
+            remoteFileList.clear();
+            downloadButton.setDisable(true);
+        });
+        downloadButton.setDisable(true);
         peerSelector.setPromptText("Select a Peer...");
         peerSelector.setConverter(new StringConverter<>() {
             @Override
@@ -140,6 +147,8 @@ public final class DownloadTab extends Tab {
             return;
         }
 
+        listedPeer = null;
+        remoteFileList.clear();
         viewFilesButton.setDisable(true);
         downloadButton.setDisable(true);
         progress.setVisible(true);
@@ -153,10 +162,16 @@ public final class DownloadTab extends Tab {
         };
 
         task.setOnSucceeded(e -> {
+            if (!peer.equals(peerSelector.getValue())) {
+                viewFilesButton.setDisable(false);
+                progress.setVisible(false);
+                return;
+            }
             remoteFileList.setAll(task.getValue());
+            listedPeer = peer;
             statusLabel.setText("Found " + remoteFileList.size() + " file(s) on " + peer.name());
             viewFilesButton.setDisable(false);
-            downloadButton.setDisable(false);
+            downloadButton.setDisable(remoteFileList.isEmpty());
             progress.setVisible(false);
         });
 
@@ -165,7 +180,7 @@ public final class DownloadTab extends Tab {
             LOGGER.log(Level.WARNING, "Failed connecting to peer for file list", ex);
             statusLabel.setText("Connection failed: " + ex.getMessage());
             viewFilesButton.setDisable(false);
-            downloadButton.setDisable(false);
+            downloadButton.setDisable(true);
             progress.setVisible(false);
 
             showAlert(Alert.AlertType.ERROR, "Connection Error",
@@ -181,7 +196,7 @@ public final class DownloadTab extends Tab {
         Peer peer = peerSelector.getValue();
         SharedFile file = remoteTable.getSelectionModel().getSelectedItem();
 
-        if (peer == null) {
+        if (peer == null || !peer.equals(listedPeer)) {
             showAlert(Alert.AlertType.WARNING, "Peer Selection Required", "Please select a peer.");
             return;
         }
@@ -199,7 +214,7 @@ public final class DownloadTab extends Tab {
         Task<Path> task = new Task<>() {
             @Override
             protected Path call() throws Exception {
-                return transferService.download(peer, file.fileName());
+                return transferService.download(peer, file.fileName(), file.fileSize());
             }
         };
 
@@ -207,7 +222,7 @@ public final class DownloadTab extends Tab {
             Path target = task.getValue();
             statusLabel.setText("Successfully downloaded: " + target.getFileName());
             viewFilesButton.setDisable(false);
-            downloadButton.setDisable(false);
+            downloadButton.setDisable(!peer.equals(listedPeer));
             progress.setVisible(false);
 
             showAlert(Alert.AlertType.INFORMATION, "Download Complete",
@@ -219,7 +234,7 @@ public final class DownloadTab extends Tab {
             LOGGER.log(Level.WARNING, "Download failed", ex);
             statusLabel.setText("Download failed: " + ex.getMessage());
             viewFilesButton.setDisable(false);
-            downloadButton.setDisable(false);
+            downloadButton.setDisable(!peer.equals(listedPeer));
             progress.setVisible(false);
 
             showAlert(Alert.AlertType.ERROR, "Download Failed",
@@ -227,7 +242,7 @@ public final class DownloadTab extends Tab {
         });
 
         Thread thread = new Thread(task, "DownloadTab-DownloadTask");
-        thread.setDaemon(true);
+        // Let an in-progress transfer finish and write history before the JVM exits.
         thread.start();
     }
 

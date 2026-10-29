@@ -36,7 +36,7 @@ public final class DatabaseDaoTest {
 
         Peer updated = new Peer(created.id(), "Rahul Sharma", "192.168.1.25", 5001);
         peerDao.update(updated);
-        Peer stored = peerDao.findAll().getFirst();
+        Peer stored = peerDao.findAll().get(0);
         TestSupport.assertEquals("Rahul Sharma", stored.name(), "UPDATE must save the new peer name.");
         TestSupport.assertEquals(5001, stored.port(), "UPDATE must save the new peer port.");
 
@@ -64,7 +64,7 @@ public final class DatabaseDaoTest {
                 new DownloadHistory(0, "notes.pdf", "Rahul", downloadedAt, "SUCCESS"));
 
         TestSupport.assertTrue(created.id() > 0, "Creating history must assign a database ID.");
-        TestSupport.assertEquals("SUCCESS", historyDao.findAll().getFirst().status(),
+        TestSupport.assertEquals("SUCCESS", historyDao.findAll().get(0).status(),
                 "History SELECT must return the saved status.");
 
         historyDao.deleteById(created.id());

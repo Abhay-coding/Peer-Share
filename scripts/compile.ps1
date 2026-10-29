@@ -22,9 +22,9 @@ $extraCp = if ($libJars.Count -gt 0) { $libJars -join ';' } else { '' }
 $mainSources = Get-ChildItem -Recurse 'src\main\java' -Filter '*.java' | ForEach-Object FullName
 if ($mainSources) {
     if ($extraCp) {
-        & $javac -cp $extraCp -d out\main $mainSources
+        & $javac --release 17 -cp $extraCp -d out\main $mainSources
     } else {
-        & $javac -d out\main $mainSources
+        & $javac --release 17 -d out\main $mainSources
     }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
@@ -32,6 +32,6 @@ if ($mainSources) {
 $testSources = Get-ChildItem -Recurse 'src\test\java' -Filter '*.java' | ForEach-Object FullName
 if ($testSources) {
     $testCp = if ($extraCp) { "out\main;$extraCp" } else { "out\main" }
-    & $javac -cp $testCp -d out\test $testSources
+    & $javac --release 17 -cp $testCp -d out\test $testSources
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }

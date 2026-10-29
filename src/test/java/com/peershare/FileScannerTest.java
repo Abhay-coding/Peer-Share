@@ -80,6 +80,6 @@ public final class FileScannerTest {
 
         List<SharedFile> remainingFiles = dao.findAll();
         TestSupport.assertEquals(1, remainingFiles.size(), "Database must update to reflect deleted file.");
-        TestSupport.assertEquals("docB.txt", remainingFiles.getFirst().fileName(), "Only docB.txt should remain.");
+        TestSupport.assertEquals("docB.txt", remainingFiles.get(0).fileName(), "Only docB.txt should remain.");
     }
 }

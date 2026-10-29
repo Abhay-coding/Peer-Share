@@ -21,6 +21,8 @@ public final class TransferServiceTest {
         testSuccessfulDownload();
         testUnsafeFileNameDownloadFailure();
         testMissingFileDownloadFailure();
+        testExistingDownloadIsPreserved();
+        testRejectedNameCannotDeleteAnotherPartFile();
     }
 
     private static void testSuccessfulDownload() throws Exception {
@@ -52,7 +54,7 @@ public final class TransferServiceTest {
 
             List<DownloadHistory> history = historyDao.findAll();
             TestSupport.assertEquals(1, history.size(), "One history record must be saved.");
-            DownloadHistory record = history.getFirst();
+            DownloadHistory record = history.get(0);
             TestSupport.assertEquals("sample.txt", record.fileName(), "History must record file name.");
             TestSupport.assertEquals("Alice", record.peerName(), "History must record peer name.");
             TestSupport.assertEquals("SUCCESS", record.status(), "History status must be SUCCESS.");
@@ -92,7 +94,7 @@ public final class TransferServiceTest {
 
             List<DownloadHistory> history = historyDao.findAll();
             TestSupport.assertEquals(1, history.size(), "Failed download must create one history entry.");
-            TestSupport.assertEquals("FAILED", history.getFirst().status(),
+            TestSupport.assertEquals("FAILED", history.get(0).status(),
                     "Failed download history status must be FAILED.");
         } finally {
             server.stop();
@@ -129,10 +131,47 @@ public final class TransferServiceTest {
 
             List<DownloadHistory> history = historyDao.findAll();
             TestSupport.assertEquals(1, history.size(), "History row must be saved on missing file failure.");
-            TestSupport.assertEquals("FAILED", history.getFirst().status(),
+            TestSupport.assertEquals("FAILED", history.get(0).status(),
                     "History status must be FAILED for missing file.");
         } finally {
             server.stop();
+        }
+    }
+
+    private static void testExistingDownloadIsPreserved() throws Exception {
+        Path shared = Files.createTempDirectory("peershare-existing-shared");
+        Path downloads = Files.createTempDirectory("peershare-existing-downloads");
+        Path db = Files.createTempDirectory("peershare-existing-db");
+        Files.writeString(shared.resolve("same.txt"), "new content");
+        Files.writeString(downloads.resolve("same.txt"), "keep this");
+        DatabaseManager manager = new DatabaseManager(db.resolve("peershare.db"));
+        manager.initialize();
+        DownloadHistoryDao history = new DownloadHistoryDao(manager);
+        TransferService service = new TransferService(downloads, history, new FileTransferClient());
+        try {
+            service.download(new Peer(1, "Alice", "127.0.0.1", 5000), "same.txt");
+            throw new AssertionError("Existing download should be refused.");
+        } catch (IOException expected) {
+            TestSupport.assertEquals("keep this", Files.readString(downloads.resolve("same.txt")),
+                    "Existing data must not be overwritten.");
+        }
+    }
+
+    private static void testRejectedNameCannotDeleteAnotherPartFile() throws Exception {
+        Path downloads = Files.createTempDirectory("peershare-unsafe-parts");
+        Path db = Files.createTempDirectory("peershare-unsafe-parts-db");
+        Path unrelated = downloads.resolve("other.part");
+        Files.writeString(unrelated, "keep this");
+        DatabaseManager manager = new DatabaseManager(db.resolve("peershare.db"));
+        manager.initialize();
+        TransferService service = new TransferService(downloads, new DownloadHistoryDao(manager),
+                new FileTransferClient());
+        try {
+            service.download(new Peer(1, "Alice", "127.0.0.1", 5000), "../other");
+            throw new AssertionError("Unsafe name should be refused.");
+        } catch (IOException expected) {
+            TestSupport.assertEquals("keep this", Files.readString(unrelated),
+                    "A rejected request must not delete an unrelated temporary file.");
         }
     }
 }

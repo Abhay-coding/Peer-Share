@@ -78,5 +78,11 @@ public final class ModelAndValidationTest {
                 "A parent-folder filename must be rejected.");
         TestSupport.assertTrue(!InputValidator.isSafeFileName("folder/notes.pdf"),
                 "A filename with a folder separator must be rejected.");
+        TestSupport.assertTrue(InputValidator.isSafeFileName("chapter..two.txt"),
+                "A plain filename with two dots must be accepted.");
+        TestSupport.assertTrue(!InputValidator.isSafeFileName("bad|name.txt"),
+                "A protocol separator in a filename must be rejected.");
+        TestSupport.assertTrue(!InputValidator.isSafeFileName("CON.txt"),
+                "A reserved device name must be rejected.");
     }
 }

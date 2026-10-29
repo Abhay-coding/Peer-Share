@@ -19,6 +19,8 @@ public final class AppConfigTest {
         AppConfig config = AppConfig.load(projectRoot);
 
         TestSupport.assertEquals(5001, config.serverPort(), "The configured port must be read.");
+        TestSupport.assertEquals("127.0.0.1", config.bindAddress(),
+                "The default server must accept only same-computer connections.");
         TestSupport.assertEquals(projectRoot.resolve("shared_files"), config.sharedDirectory(),
                 "Shared files must stay below the project folder.");
         TestSupport.assertEquals(projectRoot.resolve("downloads"), config.downloadDirectory(),
@@ -27,5 +29,26 @@ public final class AppConfigTest {
                 "The database must stay below the project folder.");
         TestSupport.assertTrue(Files.isDirectory(config.sharedDirectory()), "The shared folder must be created.");
         TestSupport.assertTrue(Files.isDirectory(config.downloadDirectory()), "The download folder must be created.");
+
+        Files.writeString(projectRoot.resolve("config.properties"), String.join(System.lineSeparator(),
+                "server.port=5001",
+                "server.bindAddress=0.0.0.0",
+                "shared.directory=shared_files",
+                "downloads.directory=downloads"));
+        TestSupport.assertEquals("0.0.0.0", AppConfig.load(projectRoot).bindAddress(),
+                "LAN access must require an explicit setting.");
+
+        Files.writeString(projectRoot.resolve("config.properties"), String.join(System.lineSeparator(),
+                "server.port=5001",
+                "server.bindAddress=example.com",
+                "shared.directory=shared_files",
+                "downloads.directory=downloads"));
+        TestSupport.expectIllegalArgument(() -> {
+            try {
+                AppConfig.load(projectRoot);
+            } catch (java.io.IOException e) {
+                throw new RuntimeException(e);
+            }
+        }, "server.bindAddress must be 127.0.0.1 or 0.0.0.0.");
     }
 }

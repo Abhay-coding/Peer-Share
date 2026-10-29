@@ -43,8 +43,9 @@ public final class MainView extends BorderPane {
         Label titleLabel = new Label("PeerShare");
         titleLabel.setStyle("-fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: white;");
 
-        Label serverInfo = new Label(String.format("Listening on Port: %d  |  Shared: %s  |  Downloads: %s",
-                peerServer.port(), config.sharedDirectory().getFileName(), config.downloadDirectory().getFileName()));
+        String access = peerServer.bindAddress().equals("127.0.0.1") ? "This computer only" : "Local network";
+        Label serverInfo = new Label(String.format("%s | Port: %d | Shared: %s | Downloads: %s",
+                access, peerServer.port(), config.sharedDirectory().getFileName(), config.downloadDirectory().getFileName()));
         serverInfo.setStyle("-fx-font-size: 13px; -fx-text-fill: #ecf0f1;");
 
         header.getChildren().addAll(titleLabel, serverInfo);

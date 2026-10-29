@@ -12,8 +12,8 @@ import java.nio.charset.StandardCharsets;
  */
 public final class Protocol {
     public static final int MAX_LINE_BYTES = 4096;
-    public static final int MAX_LIST_FILES = 10000;
-    public static final long MAX_FILE_BYTES = 1024L * 1024 * 1024;
+    public static final int MAX_LIST_FILES = 500;
+    public static final long MAX_FILE_BYTES = 100L * 1024 * 1024;
     public static final String CMD_LIST = "LIST";
     public static final String CMD_DOWNLOAD = "DOWNLOAD";
     public static final String STATUS_OK = "OK";

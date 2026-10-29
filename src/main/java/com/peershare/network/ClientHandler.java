@@ -61,7 +61,9 @@ public final class ClientHandler implements Runnable {
 
     private void handleList(OutputStream out) throws IOException {
         // Folder is scanned at request time so remote peers always see current files
-        List<SharedFile> files = fileScanner.scan();
+        List<SharedFile> files = fileScanner.scan().stream()
+                .filter(file -> file.fileSize() <= Protocol.MAX_FILE_BYTES)
+                .toList();
         if (files.size() > Protocol.MAX_LIST_FILES) {
             Protocol.writeLine(out, Protocol.STATUS_ERROR + " Too many shared files");
             return;

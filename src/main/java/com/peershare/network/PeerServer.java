@@ -7,9 +7,11 @@ import com.peershare.util.AppLogger;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.InetAddress;
 import java.nio.file.Path;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Semaphore;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -19,24 +21,32 @@ import java.util.logging.Logger;
  */
 public final class PeerServer {
     private static final Logger LOGGER = AppLogger.create();
+    public static final int MAX_CLIENTS = 10;
 
     private final int configuredPort;
+    private final String bindAddress;
     private final Path sharedDirectory;
     private final FileScanner fileScanner;
 
     private ServerSocket serverSocket;
     private Thread acceptThread;
     private final Set<Socket> clients = ConcurrentHashMap.newKeySet();
+    private final Semaphore clientSlots = new Semaphore(MAX_CLIENTS);
     private volatile boolean running = false;
 
     public PeerServer(int port, Path sharedDirectory) {
+        this(port, sharedDirectory, "127.0.0.1");
+    }
+
+    public PeerServer(int port, Path sharedDirectory, String bindAddress) {
         this.configuredPort = port;
         this.sharedDirectory = sharedDirectory;
+        this.bindAddress = bindAddress;
         this.fileScanner = new FileScanner(sharedDirectory);
     }
 
     public PeerServer(AppConfig config) {
-        this(config.serverPort(), config.sharedDirectory());
+        this(config.serverPort(), config.sharedDirectory(), config.bindAddress());
     }
 
     /**
@@ -52,7 +62,7 @@ public final class PeerServer {
         if (acceptThread != null && acceptThread.isAlive()) {
             throw new IOException("Previous server is still stopping.");
         }
-        serverSocket = new ServerSocket(configuredPort);
+        serverSocket = new ServerSocket(configuredPort, 50, InetAddress.getByName(bindAddress));
         running = true;
 
         ServerSocket listener = serverSocket;
@@ -71,7 +81,16 @@ public final class PeerServer {
                     clientSocket.close();
                     break;
                 }
-                clientSocket.setSoTimeout(5000);
+                try {
+                    clientSocket.setSoTimeout(5000);
+                } catch (IOException e) {
+                    clientSocket.close();
+                    throw e;
+                }
+                if (!clientSlots.tryAcquire()) {
+                    clientSocket.close();
+                    continue;
+                }
                 clients.add(clientSocket);
                 ClientHandler handler = new ClientHandler(clientSocket, sharedDirectory, fileScanner);
                 Thread handlerThread = new Thread(() -> {
@@ -79,6 +98,7 @@ public final class PeerServer {
                         handler.run();
                     } finally {
                         clients.remove(clientSocket);
+                        clientSlots.release();
                     }
                 }, "PeerServer-ClientHandler");
                 handlerThread.setDaemon(true);
@@ -101,6 +121,10 @@ public final class PeerServer {
             return serverSocket.getLocalPort();
         }
         return configuredPort;
+    }
+
+    public String bindAddress() {
+        return bindAddress;
     }
 
     /**

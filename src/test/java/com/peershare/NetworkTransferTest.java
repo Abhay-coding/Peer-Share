@@ -27,6 +27,8 @@ public final class NetworkTransferTest {
         testWrongChecksum();
         testListedSizeChanged();
         testStopClosesConnectedClient();
+        testConnectionLimit();
+        testOversizedFileIsNotListed();
     }
 
     private static void testRemoteFileList() throws Exception {
@@ -181,6 +183,48 @@ public final class NetworkTransferTest {
                     "Server should answer after restart.");
         } finally {
             server.stop();
+        }
+    }
+
+    private static void testConnectionLimit() throws Exception {
+        PeerServer server = new PeerServer(0, Files.createTempDirectory("peershare-cap-shared"));
+        server.start();
+        List<Socket> held = new java.util.ArrayList<>();
+        try {
+            for (int i = 0; i < PeerServer.MAX_CLIENTS; i++) {
+                held.add(new Socket("127.0.0.1", server.port()));
+            }
+            // Let the accept thread register the held connections before checking the next one.
+            Thread.sleep(150);
+            try (Socket extra = new Socket("127.0.0.1", server.port())) {
+                extra.setSoTimeout(2000);
+                TestSupport.assertEquals(-1, extra.getInputStream().read(),
+                        "An extra client must be closed instead of starting another worker.");
+            }
+        } finally {
+            for (Socket socket : held) socket.close();
+            server.stop();
+        }
+    }
+
+    private static void testOversizedFileIsNotListed() throws Exception {
+        Path shared = Files.createTempDirectory("peershare-limit-shared");
+        Path big = shared.resolve("too-big.bin");
+        try (java.io.RandomAccessFile file = new java.io.RandomAccessFile(big.toFile(), "rw")) {
+            file.setLength(Protocol.MAX_FILE_BYTES + 1);
+        }
+        Files.writeString(shared.resolve("small.txt"), "hello");
+        PeerServer server = new PeerServer(0, shared);
+        server.start();
+        try {
+            List<SharedFile> files = new FileTransferClient().listRemoteFiles(
+                    new Peer(1, "Local", "127.0.0.1", server.port()));
+            TestSupport.assertEquals(1, files.size(), "Oversized files should be omitted from remote lists.");
+            TestSupport.assertEquals("small.txt", files.get(0).fileName(),
+                    "A small file should remain available when another file is too large.");
+        } finally {
+            server.stop();
+            Files.deleteIfExists(big);
         }
     }
 

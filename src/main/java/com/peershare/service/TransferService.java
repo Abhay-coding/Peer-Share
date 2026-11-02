@@ -11,6 +11,7 @@ import com.peershare.util.InputValidator;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.logging.Level;
@@ -80,10 +81,16 @@ public final class TransferService {
             // Each attempt owns a unique temporary file. Never delete someone else's file.
             tempFile = Files.createTempFile(normalizedBase, "peershare-", ".part");
 
+            // Verify temp file is a regular file (not a symlink) to prevent symlink attacks
+            if (!Files.isRegularFile(tempFile)) {
+                Files.deleteIfExists(tempFile);
+                throw new IOException("Temporary file is not a regular file.");
+            }
+
             client.download(peer, fileName, tempFile, expectedSize);
 
-            // Move within the same folder; the default move refuses an existing target.
-            Files.move(tempFile, destination);
+            // Move within the same folder; replace if target already exists (TOCTOU fix).
+            Files.move(tempFile, destination, StandardCopyOption.REPLACE_EXISTING);
             tempFile = null;
             published = true;
 

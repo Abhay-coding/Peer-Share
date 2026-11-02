@@ -16,6 +16,17 @@ shared_files/*
 !shared_files/.gitkeep
 *.part
 
+# Dependencies (JARs in lib/ - consider using Maven/Gradle instead)
+lib/
+
+# Build & test output directories
+outputs/
+work/
+
+# Internal tooling directories
+.claude-flow/
+.swarm/
+
 # IDE and Editor files
 .vscode/
 .idea/
@@ -26,6 +37,10 @@ shared_files/*
 Thumbs.db
 desktop.ini
 
-# Markdown documentation handling
+# Test artifacts
+Integer.MAX_VALUE
+
+# Markdown documentation handling (keep README.md and EXPLANATION.md)
 *.md
 !README.md
+!EXPLANATION.md

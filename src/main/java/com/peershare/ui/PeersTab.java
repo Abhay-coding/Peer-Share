@@ -9,12 +9,14 @@ import javafx.beans.property.SimpleLongProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 
 import java.sql.SQLException;
+import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -123,14 +125,28 @@ public final class PeersTab extends Tab {
             int port = InputValidator.parsePort(portField.getText());
 
             Peer peer = new Peer(0, nameField.getText().trim(), ipField.getText().trim(), port);
-            peerDao.create(peer);
-            refreshPeers();
-            clearForm();
+
+            Task<Peer> task = new Task<>() {
+                @Override
+                protected Peer call() throws SQLException {
+                    return peerDao.create(peer);
+                }
+            };
+
+            task.setOnSucceeded(e -> {
+                refreshPeers();
+                clearForm();
+            });
+
+            task.setOnFailed(e -> {
+                Throwable ex = task.getException();
+                LOGGER.log(Level.SEVERE, "Failed to create peer", ex);
+                showAlert(Alert.AlertType.ERROR, "Database Error", "Could not save peer: " + ex.getMessage());
+            });
+
+            new Thread(task, "PeersTab-AddPeerTask").start();
         } catch (IllegalArgumentException ex) {
             showAlert(Alert.AlertType.WARNING, "Validation Error", ex.getMessage());
-        } catch (SQLException ex) {
-            LOGGER.log(Level.SEVERE, "Failed to create peer", ex);
-            showAlert(Alert.AlertType.ERROR, "Database Error", "Could not save peer: " + ex.getMessage());
         }
     }
 
@@ -145,14 +161,29 @@ public final class PeersTab extends Tab {
             int port = InputValidator.parsePort(portField.getText());
 
             Peer updated = new Peer(selectedPeer.id(), nameField.getText().trim(), ipField.getText().trim(), port);
-            peerDao.update(updated);
-            refreshPeers();
-            clearForm();
+
+            Task<Void> task = new Task<>() {
+                @Override
+                protected Void call() throws SQLException {
+                    peerDao.update(updated);
+                    return null;
+                }
+            };
+
+            task.setOnSucceeded(e -> {
+                refreshPeers();
+                clearForm();
+            });
+
+            task.setOnFailed(e -> {
+                Throwable ex = task.getException();
+                LOGGER.log(Level.SEVERE, "Failed to update peer", ex);
+                showAlert(Alert.AlertType.ERROR, "Database Error", "Could not update peer: " + ex.getMessage());
+            });
+
+            new Thread(task, "PeersTab-UpdatePeerTask").start();
         } catch (IllegalArgumentException ex) {
             showAlert(Alert.AlertType.WARNING, "Validation Error", ex.getMessage());
-        } catch (SQLException ex) {
-            LOGGER.log(Level.SEVERE, "Failed to update peer", ex);
-            showAlert(Alert.AlertType.ERROR, "Database Error", "Could not update peer: " + ex.getMessage());
         }
     }
 
@@ -162,23 +193,47 @@ public final class PeersTab extends Tab {
             return;
         }
 
-        try {
-            peerDao.deleteById(selectedPeer.id());
+        Task<Void> task = new Task<>() {
+            @Override
+            protected Void call() throws SQLException {
+                peerDao.deleteById(selectedPeer.id());
+                return null;
+            }
+        };
+
+        task.setOnSucceeded(e -> {
             refreshPeers();
             clearForm();
-        } catch (SQLException ex) {
+        });
+
+        task.setOnFailed(e -> {
+            Throwable ex = task.getException();
             LOGGER.log(Level.SEVERE, "Failed to delete peer", ex);
             showAlert(Alert.AlertType.ERROR, "Database Error", "Could not delete peer: " + ex.getMessage());
-        }
+        });
+
+        new Thread(task, "PeersTab-DeletePeerTask").start();
     }
 
     public void refreshPeers() {
-        try {
-            peerList.setAll(peerDao.findAll());
-        } catch (SQLException ex) {
+        Task<List<Peer>> task = new Task<>() {
+            @Override
+            protected List<Peer> call() throws SQLException {
+                return peerDao.findAll();
+            }
+        };
+
+        task.setOnSucceeded(e -> {
+            peerList.setAll(task.getValue());
+        });
+
+        task.setOnFailed(e -> {
+            Throwable ex = task.getException();
             LOGGER.log(Level.SEVERE, "Failed to load peers", ex);
             showAlert(Alert.AlertType.ERROR, "Database Error", "Could not load peers: " + ex.getMessage());
-        }
+        });
+
+        new Thread(task, "PeersTab-RefreshPeersTask").start();
     }
 
     private void clearForm() {

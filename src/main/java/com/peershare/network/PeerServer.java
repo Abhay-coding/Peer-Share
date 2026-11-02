@@ -63,6 +63,7 @@ public final class PeerServer {
             throw new IOException("Previous server is still stopping.");
         }
         serverSocket = new ServerSocket(configuredPort, 50, InetAddress.getByName(bindAddress));
+        serverSocket.setReuseAddress(true);
         running = true;
 
         ServerSocket listener = serverSocket;

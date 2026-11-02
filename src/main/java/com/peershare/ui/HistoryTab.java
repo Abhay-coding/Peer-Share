@@ -7,12 +7,14 @@ import javafx.beans.property.SimpleLongProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 
 import java.sql.SQLException;
+import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -104,34 +106,59 @@ public final class HistoryTab extends Tab {
     }
 
     public void refreshHistory() {
-        try {
-            historyList.setAll(historyDao.findAll());
-        } catch (SQLException ex) {
+        Task<List<DownloadHistory>> task = new Task<>() {
+            @Override
+            protected List<DownloadHistory> call() throws SQLException {
+                return historyDao.findAll();
+            }
+        };
+
+        task.setOnSucceeded(e -> {
+            historyList.setAll(task.getValue());
+        });
+
+        task.setOnFailed(e -> {
+            Throwable ex = task.getException();
             LOGGER.log(Level.SEVERE, "Failed to load download history", ex);
-        }
+            showAlert(Alert.AlertType.ERROR, "Database Error", "Could not load history: " + ex.getMessage());
+        });
+
+        new Thread(task, "HistoryTab-RefreshHistoryTask").start();
     }
 
     private void handleDeleteSelected() {
         DownloadHistory selected = historyTable.getSelectionModel().getSelectedItem();
         if (selected == null) {
-            Alert alert = new Alert(Alert.AlertType.WARNING);
-            alert.setTitle("Selection Required");
-            alert.setHeaderText(null);
-            alert.setContentText("Please select a history record to delete.");
-            alert.showAndWait();
+            showAlert(Alert.AlertType.WARNING, "Selection Required", "Please select a history record to delete.");
             return;
         }
 
-        try {
-            historyDao.deleteById(selected.id());
+        Task<Void> task = new Task<>() {
+            @Override
+            protected Void call() throws SQLException {
+                historyDao.deleteById(selected.id());
+                return null;
+            }
+        };
+
+        task.setOnSucceeded(e -> {
             refreshHistory();
-        } catch (SQLException ex) {
+        });
+
+        task.setOnFailed(e -> {
+            Throwable ex = task.getException();
             LOGGER.log(Level.SEVERE, "Failed to delete history record", ex);
-            Alert alert = new Alert(Alert.AlertType.ERROR);
-            alert.setTitle("Database Error");
-            alert.setHeaderText(null);
-            alert.setContentText("Could not delete history record: " + ex.getMessage());
-            alert.showAndWait();
-        }
+            showAlert(Alert.AlertType.ERROR, "Database Error", "Could not delete history record: " + ex.getMessage());
+        });
+
+        new Thread(task, "HistoryTab-DeleteHistoryTask").start();
+    }
+
+    private void showAlert(Alert.AlertType type, String title, String message) {
+        Alert alert = new Alert(type);
+        alert.setTitle(title);
+        alert.setHeaderText(null);
+        alert.setContentText(message);
+        alert.showAndWait();
     }
 }

@@ -47,19 +47,12 @@ public final class FileTransferClient {
      * @throws IOException if the peer is unavailable or returns an error
      */
     public List<SharedFile> listRemoteFiles(Peer peer) throws IOException {
-        Socket socket = new Socket();
-        try {
+        try (Socket socket = new Socket()) {
             socket.connect(new InetSocketAddress(peer.ipAddress(), peer.port()), connectTimeoutMs);
             socket.setSoTimeout(readTimeoutMs);
-        } catch (IOException e) {
-            socket.close();
-            throw new IOException("Could not connect to peer " + peer.name() + " at "
-                    + peer.ipAddress() + ":" + peer.port() + " (" + e.getMessage() + ")", e);
-        }
 
-        try (socket;
-             InputStream in = socket.getInputStream();
-             OutputStream out = socket.getOutputStream()) {
+            try (InputStream in = socket.getInputStream();
+                 OutputStream out = socket.getOutputStream()) {
 
             // Send LIST command
             Protocol.writeLine(out, Protocol.CMD_LIST);
@@ -107,6 +100,7 @@ public final class FileTransferClient {
             return remoteFiles;
         }
     }
+    }
 
     /**
      * Downloads a remote file from the specified peer to a temporary target path.
@@ -125,19 +119,12 @@ public final class FileTransferClient {
         if (!InputValidator.isSafeFileName(fileName)) {
             throw new IOException("Unsafe or invalid filename.");
         }
-        Socket socket = new Socket();
-        try {
+        try (Socket socket = new Socket()) {
             socket.connect(new InetSocketAddress(peer.ipAddress(), peer.port()), connectTimeoutMs);
             socket.setSoTimeout(readTimeoutMs);
-        } catch (IOException e) {
-            socket.close();
-            throw new IOException("Could not connect to peer " + peer.name() + " at "
-                    + peer.ipAddress() + ":" + peer.port() + " (" + e.getMessage() + ")", e);
-        }
 
-        try (socket;
-             InputStream in = socket.getInputStream();
-             OutputStream out = socket.getOutputStream()) {
+            try (InputStream in = socket.getInputStream();
+                 OutputStream out = socket.getOutputStream()) {
 
             // Send DOWNLOAD command
             Protocol.writeLine(out, Protocol.CMD_DOWNLOAD + " " + fileName);
@@ -178,7 +165,8 @@ public final class FileTransferClient {
             try (OutputStream fileOut = Files.newOutputStream(temporaryTarget)) {
                 while (totalRead < expectedSize) {
                     setRemainingTimeout(socket, deadline);
-                    int toRead = (int) Math.min(buffer.length, expectedSize - totalRead);
+                    long remaining = expectedSize - totalRead;
+                    int toRead = (int) Math.min(buffer.length, Math.min(Integer.MAX_VALUE, remaining));
                     int bytesRead = in.read(buffer, 0, toRead);
                     if (bytesRead == -1) {
                         throw new IOException("Connection interrupted while streaming file. Expected "
@@ -201,6 +189,7 @@ public final class FileTransferClient {
 
             return temporaryTarget;
         }
+    }
     }
 
     private static int parseCount(String header) throws IOException {

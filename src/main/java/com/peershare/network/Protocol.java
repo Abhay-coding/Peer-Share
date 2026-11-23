@@ -34,14 +34,15 @@ public final class Protocol {
     public static String readLine(InputStream in) throws IOException {
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         int b;
+        int bytesRead = 0;
         while ((b = in.read()) != -1) {
             if (b == '\n') {
                 break;
             }
+            if (++bytesRead > MAX_LINE_BYTES) {
+                throw new IOException("Protocol line is too long.");
+            }
             if (b != '\r') {
-                if (buffer.size() >= MAX_LINE_BYTES) {
-                    throw new IOException("Protocol line is too long.");
-                }
                 buffer.write(b);
             }
         }

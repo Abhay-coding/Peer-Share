@@ -6,12 +6,17 @@ import com.peershare.network.FileTransferClient;
 import com.peershare.network.PeerServer;
 import com.peershare.network.Protocol;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 
 public final class NetworkTransferTest {
     private NetworkTransferTest() {
@@ -29,6 +34,42 @@ public final class NetworkTransferTest {
         testStopClosesConnectedClient();
         testConnectionLimit();
         testOversizedFileIsNotListed();
+        testFileListRequestDeadline();
+        testProtocolLimitCountsAllBytes();
+    }
+
+    private static void testFileListRequestDeadline() throws Exception {
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            server.setSoTimeout(5000);
+            FutureTask<Void> delayedPeer = new FutureTask<>(() -> {
+                try (Socket peer = server.accept()) {
+                    peer.setSoTimeout(5000);
+                    TestSupport.assertEquals("LIST", Protocol.readLine(peer.getInputStream()), "A list was requested.");
+                    TestSupport.assertEquals(-1, peer.getInputStream().read(), "Deadline should close the connection.");
+                }
+                return null;
+            });
+            new Thread(delayedPeer, "NetworkTransferTest-DelayedPeer").start();
+            Peer peer = new Peer(1, "Slow peer", server.getInetAddress().getHostAddress(), server.getLocalPort());
+            try {
+                new FileTransferClient(3000, 3000, 500).listRemoteFiles(peer);
+                throw new AssertionError("A request deadline must also cover the response header.");
+            } catch (SocketTimeoutException ex) {
+                TestSupport.assertEquals("Peer request timed out.", ex.getMessage(), "The shorter overall deadline must win.");
+            } finally {
+                delayedPeer.get(6, TimeUnit.SECONDS);
+            }
+        }
+    }
+
+    private static void testProtocolLimitCountsAllBytes() throws Exception {
+        byte[] line = "\r".repeat(Protocol.MAX_LINE_BYTES + 1).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        try {
+            Protocol.readLine(new ByteArrayInputStream(line));
+            throw new AssertionError("The line limit must also count bytes discarded during parsing.");
+        } catch (IOException ex) {
+            TestSupport.assertEquals("Protocol line is too long.", ex.getMessage(), "Oversized lines should be rejected.");
+        }
     }
 
     private static void testRemoteFileList() throws Exception {

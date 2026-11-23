@@ -14,6 +14,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
+import java.util.concurrent.CancellationException;
+import java.util.function.BooleanSupplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -64,6 +66,10 @@ public final class TransferService {
 
     /** expectedSize is the size shown in the remote file list, or -1 when no list was used. */
     public Path download(Peer peer, String fileName, long expectedSize) throws IOException {
+        return download(peer, fileName, expectedSize, null);
+    }
+
+    public Path download(Peer peer, String fileName, long expectedSize, BooleanSupplier cancelled) throws IOException {
         Path tempFile = null;
         boolean published = false;
         Path normalizedBase = downloadsDirectory.toAbsolutePath().normalize();
@@ -87,7 +93,10 @@ public final class TransferService {
                 throw new IOException("Temporary file is not a regular file.");
             }
 
-            client.download(peer, fileName, tempFile, expectedSize);
+            client.download(peer, fileName, tempFile, expectedSize, cancelled);
+            if (cancelled != null && cancelled.getAsBoolean()) {
+                throw new CancellationException("Download cancelled.");
+            }
 
             // Create the final name in one operation. Another download may have claimed it.
             try {

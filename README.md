@@ -26,7 +26,7 @@ By default, PeerShare accepts connections from the same computer. To share acros
 
 1. Open **Peers** on the receiving computer. Give the sender a name you’ll recognize, enter its address and port, then click **Add peer**.
 2. Select the saved peer and click **Browse files**. You can also choose that peer from the **Download** screen.
-3. Search or sort the file list, select a file, then click **Download file** or press **Enter**. Use **Open downloads** to find the saved copy.
+3. Search or sort the file list, select a file, then click **Download file** or press **Enter**. Use **Open downloads** to find the saved copy. While a download is running, you can click **Cancel download** to stop it and discard the partial file.
 
 ![Peers screen with a saved computer selected and the Browse files button available](docs/screenshots/peers.png)
 
@@ -51,6 +51,7 @@ By default, PeerShare accepts connections from the same computer. To share acros
 | A download says the file already exists | Move or rename the existing file in your downloads folder before trying again. PeerShare keeps the existing copy. |
 | The downloads folder doesn’t support hard links | Run PeerShare from a local drive that supports hard links, such as an NTFS drive on Windows. |
 | The app says the port is in use | Close the other app using that port or choose a different `server.port` in `config.properties`. |
+| PeerShare rejects the folder settings | In `config.properties`, choose two separate subfolders. Keep downloads outside the shared folder and leave the project folder itself unshared. |
 
 ## Run the checks
 

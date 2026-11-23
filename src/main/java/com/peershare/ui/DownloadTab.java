@@ -22,6 +22,8 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 
@@ -36,12 +38,14 @@ public final class DownloadTab extends Tab {
     private final TableView<SharedFile> table = new TableView<>();
     private final Button reload = ViewParts.button("Refresh files", "secondary-button");
     private final Button getFile = ViewParts.button("Download file", "primary-button");
+    private final Button cancelDownload = ViewParts.button("Cancel download", "secondary-button");
     private final ProgressBar progress = new ProgressBar(ProgressBar.INDETERMINATE_PROGRESS);
     private final Label feedback = ViewParts.label("", "secondary-text");
     private final Label guidance = ViewParts.label("", "secondary-text");
     private Peer listedPeer;
     private boolean busy;
     private boolean refreshingPeers;
+    private AtomicBoolean activeDownload;
 
     public DownloadTab(PeerDao peerDao, FileTransferClient client, TransferService transferService,
                        Path downloadDirectory, Runnable addPeer, Runnable transferFinished) {
@@ -79,6 +83,13 @@ public final class DownloadTab extends Tab {
 
         reload.setOnAction(event -> listFiles(selector.getValue()));
         getFile.setOnAction(event -> downloadFile());
+        cancelDownload.setOnAction(event -> {
+            activeDownload.set(true);
+            showFeedback("Cancelling download…", false);
+            updateActions();
+        });
+        getFile.managedProperty().bind(getFile.visibleProperty());
+        cancelDownload.managedProperty().bind(cancelDownload.visibleProperty());
         table.getSelectionModel().selectedItemProperty().addListener((obs, previous, selected) -> updateActions());
         table.setOnKeyPressed(event -> {
             if (event.getCode() == KeyCode.ENTER && !getFile.isDisabled()) {
@@ -112,7 +123,7 @@ public final class DownloadTab extends Tab {
         progress.managedProperty().bind(progress.visibleProperty());
         feedback.setWrapText(true);
         setContent(ViewParts.page(source, ViewParts.row(search, ViewParts.spacer(), reload), table,
-                ViewParts.row(getFile, openFolder, ViewParts.spacer(), progress), feedback));
+                ViewParts.row(getFile, cancelDownload, openFolder, ViewParts.spacer(), progress), feedback));
         updateActions();
     }
 
@@ -173,8 +184,10 @@ public final class DownloadTab extends Tab {
     private void downloadFile() {
         Peer peer = listedPeer;
         SharedFile file = table.getSelectionModel().getSelectedItem();
+        AtomicBoolean cancelled = new AtomicBoolean();
+        activeDownload = cancelled;
         runTask("Downloading " + file.fileName() + "…", "Couldn’t download " + file.fileName() + ". ",
-                () -> transferService.download(peer, file.fileName(), file.fileSize()),
+                () -> transferService.download(peer, file.fileName(), file.fileSize(), cancelled::get),
                 path -> showFeedback("Saved " + path.getFileName() + " to downloads.", false), true);
     }
 
@@ -191,6 +204,7 @@ public final class DownloadTab extends Tab {
         };
         task.setOnSucceeded(event -> {
             busy = false;
+            activeDownload = null;
             success.accept(task.getValue());
             updateActions();
             if (download) {
@@ -199,9 +213,14 @@ public final class DownloadTab extends Tab {
         });
         task.setOnFailed(event -> {
             busy = false;
+            activeDownload = null;
             Throwable error = task.getException();
-            AppLogger.create().log(Level.WARNING, failure, error);
-            showFeedback(download && error.getMessage() != null ? failure + error.getMessage() : failure.strip(), true);
+            if (error instanceof CancellationException) {
+                showFeedback("Download cancelled.", false);
+            } else {
+                AppLogger.create().log(Level.WARNING, failure, error);
+                showFeedback(download && error.getMessage() != null ? failure + error.getMessage() : failure.strip(), true);
+            }
             updateActions();
             if (download) {
                 transferFinished.run();
@@ -224,6 +243,9 @@ public final class DownloadTab extends Tab {
         selector.setDisable(busy || peers.isEmpty());
         reload.setDisable(busy || !selected);
         getFile.setDisable(busy || listedPeer == null || table.getSelectionModel().getSelectedItem() == null);
+        getFile.setVisible(activeDownload == null);
+        cancelDownload.setVisible(activeDownload != null);
+        cancelDownload.setDisable(activeDownload == null || activeDownload.get());
         progress.setVisible(busy);
         if (!files.isEmpty()) {
             guidance.setText("No matches. Try a different search.");

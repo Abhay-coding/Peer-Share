@@ -17,7 +17,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 
 /**
  * FileTransferClient opens short-lived TCP connections to remote peers
@@ -26,15 +26,25 @@ import java.util.concurrent.TimeUnit;
 public final class FileTransferClient {
     private static final int DEFAULT_CONNECT_TIMEOUT_MS = 3000;
     private static final int DEFAULT_READ_TIMEOUT_MS = 15000;
+    private static final int DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 
     private final int connectTimeoutMs;
     private final int readTimeoutMs;
+    private final int requestTimeoutMs;
 
     public FileTransferClient() {
         this(DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_READ_TIMEOUT_MS);
     }
 
     public FileTransferClient(int connectTimeoutMs, int readTimeoutMs) {
+        this(connectTimeoutMs, readTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS);
+    }
+
+    public FileTransferClient(int connectTimeoutMs, int readTimeoutMs, int requestTimeoutMs) {
+        if (requestTimeoutMs <= 0) {
+            throw new IllegalArgumentException("Request timeout must be positive.");
+        }
+        this.requestTimeoutMs = requestTimeoutMs;
         this.connectTimeoutMs = connectTimeoutMs;
         this.readTimeoutMs = readTimeoutMs;
     }
@@ -47,12 +57,7 @@ public final class FileTransferClient {
      * @throws IOException if the peer is unavailable or returns an error
      */
     public List<SharedFile> listRemoteFiles(Peer peer) throws IOException {
-        try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(peer.ipAddress(), peer.port()), connectTimeoutMs);
-            socket.setSoTimeout(readTimeoutMs);
-
-            try (InputStream in = socket.getInputStream();
-                 OutputStream out = socket.getOutputStream()) {
+        return request(peer, null, (in, out) -> {
 
             // Send LIST command
             Protocol.writeLine(out, Protocol.CMD_LIST);
@@ -98,8 +103,7 @@ public final class FileTransferClient {
             }
 
             return remoteFiles;
-        }
-    }
+        });
     }
 
     /**
@@ -116,15 +120,15 @@ public final class FileTransferClient {
     }
 
     public Path download(Peer peer, String fileName, Path temporaryTarget, long listedSize) throws IOException {
+        return download(peer, fileName, temporaryTarget, listedSize, null);
+    }
+
+    public Path download(Peer peer, String fileName, Path temporaryTarget, long listedSize,
+                         BooleanSupplier cancelled) throws IOException {
         if (!InputValidator.isSafeFileName(fileName)) {
             throw new IOException("Unsafe or invalid filename.");
         }
-        try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(peer.ipAddress(), peer.port()), connectTimeoutMs);
-            socket.setSoTimeout(readTimeoutMs);
-
-            try (InputStream in = socket.getInputStream();
-                 OutputStream out = socket.getOutputStream()) {
+        return request(peer, cancelled, (in, out) -> {
 
             // Send DOWNLOAD command
             Protocol.writeLine(out, Protocol.CMD_DOWNLOAD + " " + fileName);
@@ -161,12 +165,10 @@ public final class FileTransferClient {
             byte[] buffer = new byte[8192];
             MessageDigest digest = sha256();
             long totalRead = 0;
-            long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(2);
             try (OutputStream fileOut = Files.newOutputStream(temporaryTarget)) {
                 while (totalRead < expectedSize) {
-                    setRemainingTimeout(socket, deadline);
                     long remaining = expectedSize - totalRead;
-                    int toRead = (int) Math.min(buffer.length, Math.min(Integer.MAX_VALUE, remaining));
+                    int toRead = (int) Math.min(buffer.length, remaining);
                     int bytesRead = in.read(buffer, 0, toRead);
                     if (bytesRead == -1) {
                         throw new IOException("Connection interrupted while streaming file. Expected "
@@ -179,7 +181,6 @@ public final class FileTransferClient {
                 fileOut.flush();
             }
 
-            setRemainingTimeout(socket, deadline);
             if (in.read() != -1) {
                 throw new IOException("Peer sent more bytes than announced.");
             }
@@ -188,8 +189,25 @@ public final class FileTransferClient {
             }
 
             return temporaryTarget;
+        });
+    }
+
+    private <T> T request(Peer peer, BooleanSupplier cancelled, SocketRequest<T> action) throws IOException {
+        try (Socket socket = new Socket();
+             SocketDeadline deadline = new SocketDeadline(socket, requestTimeoutMs, cancelled)) {
+            try {
+                socket.connect(new InetSocketAddress(peer.ipAddress(), peer.port()), connectTimeoutMs);
+                socket.setSoTimeout(readTimeoutMs);
+                return action.run(socket.getInputStream(), socket.getOutputStream());
+            } catch (IOException ex) {
+                throw deadline.failure(ex);
+            }
         }
     }
+
+    @FunctionalInterface
+    private interface SocketRequest<T> {
+        T run(InputStream in, OutputStream out) throws IOException;
     }
 
     private static int parseCount(String header) throws IOException {
@@ -218,11 +236,5 @@ public final class FileTransferClient {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is unavailable", e);
         }
-    }
-
-    private void setRemainingTimeout(Socket socket, long deadline) throws IOException {
-        long remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
-        if (remaining <= 0) throw new IOException("Download timed out.");
-        socket.setSoTimeout((int) Math.min(readTimeoutMs, remaining));
     }
 }

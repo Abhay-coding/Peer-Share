@@ -18,8 +18,10 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class TransferServiceTest {
     private TransferServiceTest() {
@@ -31,6 +33,7 @@ public final class TransferServiceTest {
         testMissingFileDownloadFailure();
         testExistingDownloadIsPreserved();
         testFileCreatedDuringDownloadIsPreserved();
+        testCancellationClosesSocketAndCleansUp();
         testRejectedNameCannotDeleteAnotherPartFile();
     }
 
@@ -208,6 +211,46 @@ public final class TransferServiceTest {
             TestSupport.assertEquals(List.of(destination), entries.toList(), "The temporary download must be removed.");
         }
         TestSupport.assertEquals("FAILED", history.findAll().get(0).status(), "The conflict must be recorded as failed.");
+    }
+
+    private static void testCancellationClosesSocketAndCleansUp() throws Exception {
+        Path downloads = Files.createTempDirectory("peershare-cancel-download");
+        Path db = Files.createTempDirectory("peershare-cancel-db");
+        DatabaseManager manager = new DatabaseManager(db.resolve("peershare.db"));
+        manager.initialize();
+        DownloadHistoryDao history = new DownloadHistoryDao(manager);
+        TransferService service = new TransferService(downloads, history, new FileTransferClient());
+        AtomicBoolean cancelled = new AtomicBoolean();
+
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            server.setSoTimeout(5000);
+            FutureTask<Void> reply = new FutureTask<>(() -> {
+                try (var client = server.accept()) {
+                    client.setSoTimeout(5000);
+                    TestSupport.assertEquals("DOWNLOAD sample.txt", Protocol.readLine(client.getInputStream()),
+                            "The download must be active before it is cancelled.");
+                    cancelled.set(true);
+                    TestSupport.assertEquals(-1, client.getInputStream().read(), "Cancellation must close the socket.");
+                }
+                return null;
+            });
+            new Thread(reply, "TransferServiceTest-CancelPeer").start();
+            Peer peer = new Peer(1, "Alice", server.getInetAddress().getHostAddress(), server.getLocalPort());
+            try {
+                service.download(peer, "sample.txt", 1, cancelled::get);
+                throw new AssertionError("The download should have been cancelled.");
+            } catch (CancellationException expected) {
+                TestSupport.assertEquals("Download cancelled.", expected.getMessage(), "Report cancellation separately.");
+            } finally {
+                reply.get(6, TimeUnit.SECONDS);
+            }
+        }
+
+        try (var entries = Files.list(downloads)) {
+            TestSupport.assertEquals(List.of(), entries.toList(), "Cancellation must remove the temporary download.");
+        }
+        TestSupport.assertEquals("FAILED", history.findAll().get(0).status(),
+                "The cancelled attempt must retain its history record.");
     }
 
     private static void testRejectedNameCannotDeleteAnotherPartFile() throws Exception {

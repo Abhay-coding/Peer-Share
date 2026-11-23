@@ -3,6 +3,7 @@ package com.peershare.config;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.Properties;
 
@@ -22,7 +23,7 @@ public final class AppConfig {
     }
 
     public static AppConfig load(Path projectRoot) throws IOException {
-        Path root = projectRoot.toAbsolutePath().normalize();
+        Path root = projectRoot.toRealPath();
         Properties properties = new Properties();
 
         try (InputStream input = Files.newInputStream(root.resolve("config.properties"))) {
@@ -40,18 +41,34 @@ public final class AppConfig {
 
         Path sharedDirectory = resolveInsideRoot(root, properties.getProperty("shared.directory"));
         Path downloadDirectory = resolveInsideRoot(root, properties.getProperty("downloads.directory"));
+        if (sharedDirectory.startsWith(downloadDirectory) || downloadDirectory.startsWith(sharedDirectory)) {
+            throw new IllegalArgumentException("Shared files and downloads must use separate, non-overlapping folders.");
+        }
         Files.createDirectories(sharedDirectory);
         Files.createDirectories(downloadDirectory);
 
         return new AppConfig(port, bindAddress, sharedDirectory, downloadDirectory, root.resolve("peershare.db"));
     }
 
-    private static Path resolveInsideRoot(Path root, String configuredDirectory) {
-        Path directory = root.resolve(configuredDirectory).normalize();
-        if (!directory.startsWith(root)) {
-            throw new IllegalArgumentException("Configured folders must stay inside the project folder.");
+    private static Path resolveInsideRoot(Path root, String configuredDirectory) throws IOException {
+        if (configuredDirectory == null || configuredDirectory.isBlank()) {
+            throw new IllegalArgumentException("Set both shared.directory and downloads.directory.");
         }
-        return directory;
+        Path directory = root.resolve(configuredDirectory).normalize();
+        if (!directory.startsWith(root) || directory.equals(root)) {
+            throw new IllegalArgumentException("Configured folders must be subfolders of the project folder.");
+        }
+
+        // Resolve existing links before creating any missing folders.
+        Path existing = directory;
+        while (!Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
+            existing = existing.getParent();
+        }
+        Path resolved = existing.toRealPath().resolve(existing.relativize(directory));
+        if (!resolved.startsWith(root) || resolved.equals(root)) {
+            throw new IllegalArgumentException("Configured folders must resolve to subfolders of the project folder.");
+        }
+        return resolved;
     }
 
     public int serverPort() {

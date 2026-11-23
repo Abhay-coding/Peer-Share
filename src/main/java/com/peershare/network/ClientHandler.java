@@ -24,6 +24,7 @@ import java.util.logging.Logger;
  */
 public final class ClientHandler implements Runnable {
     private static final Logger LOGGER = AppLogger.create();
+    private static final int REQUEST_TIMEOUT_MS = 120_000;
 
     private final Socket socket;
     private final Path sharedDirectory;
@@ -38,6 +39,7 @@ public final class ClientHandler implements Runnable {
     @Override
     public void run() {
         try (socket;
+             SocketDeadline deadline = new SocketDeadline(socket, REQUEST_TIMEOUT_MS, null);
              InputStream in = socket.getInputStream();
              OutputStream out = socket.getOutputStream()) {
 

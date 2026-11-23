@@ -36,6 +36,8 @@ public final class NetworkTransferTest {
         testOversizedFileIsNotListed();
         testFileListRequestDeadline();
         testProtocolLimitCountsAllBytes();
+        testPeerReportsFileListLimit();
+        testPlaceholderIsNotShared();
     }
 
     private static void testFileListRequestDeadline() throws Exception {
@@ -266,6 +268,48 @@ public final class NetworkTransferTest {
         } finally {
             server.stop();
             Files.deleteIfExists(big);
+        }
+    }
+
+    private static void testPeerReportsFileListLimit() throws Exception {
+        Path shared = Files.createTempDirectory("peershare-list-limit");
+        for (int i = 0; i <= Protocol.MAX_LIST_FILES; i++) {
+            Files.createFile(shared.resolve("sample-" + i + ".txt"));
+        }
+        PeerServer server = new PeerServer(0, shared);
+        server.start();
+        try {
+            Peer peer = new Peer(1, "Local", "127.0.0.1", server.port());
+            new FileTransferClient().listRemoteFiles(peer);
+            throw new AssertionError("A peer with too many files must reject the list request.");
+        } catch (FileTransferClient.ListRejectedException ex) {
+            TestSupport.assertTrue(ex.fileLimitExceeded(), "A peer rejection must retain the file limit reason.");
+        } finally {
+            server.stop();
+        }
+    }
+
+    private static void testPlaceholderIsNotShared() throws Exception {
+        Path shared = Files.createTempDirectory("peershare-placeholder");
+        Files.createFile(shared.resolve(".gitkeep"));
+        PeerServer server = new PeerServer(0, shared);
+        server.start();
+        try {
+            Peer peer = new Peer(1, "Local", "127.0.0.1", server.port());
+            FileTransferClient client = new FileTransferClient();
+            TestSupport.assertEquals(List.of(), client.listRemoteFiles(peer), "A placeholder alone means there are no shared files.");
+
+            Path target = shared.resolve("received.txt");
+            try {
+                client.download(peer, ".gitkeep", target);
+                throw new AssertionError("The server should also reject direct requests for the placeholder.");
+            } catch (IOException ex) {
+                TestSupport.assertTrue(ex.getMessage().contains("Unsafe or invalid filename"),
+                        "The peer must reject the request without sending a file.");
+            }
+            TestSupport.assertTrue(!Files.exists(target), "The placeholder must not be downloaded.");
+        } finally {
+            server.stop();
         }
     }
 

@@ -18,6 +18,7 @@ public final class Protocol {
     public static final String CMD_DOWNLOAD = "DOWNLOAD";
     public static final String STATUS_OK = "OK";
     public static final String STATUS_ERROR = "ERROR";
+    static final String ERROR_TOO_MANY_FILES = "Too many shared files";
 
     private Protocol() {
     }

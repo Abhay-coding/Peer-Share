@@ -29,6 +29,7 @@ public final class TransferServiceTest {
 
     public static void run() throws Exception {
         testSuccessfulDownload();
+        testSavedDownloadSurvivesHistoryFailure();
         testUnsafeFileNameDownloadFailure();
         testMissingFileDownloadFailure();
         testExistingDownloadIsPreserved();
@@ -74,6 +75,35 @@ public final class TransferServiceTest {
         } finally {
             server.stop();
         }
+    }
+
+    private static void testSavedDownloadSurvivesHistoryFailure() throws Exception {
+        Path shared = Files.createTempDirectory("peershare-history-failure-shared");
+        Path downloads = Files.createTempDirectory("peershare-history-failure-downloads");
+        Path db = Files.createTempDirectory("peershare-history-failure-db");
+        Files.writeString(shared.resolve("sample.txt"), "saved contents");
+        DatabaseManager manager = new DatabaseManager(db.resolve("peershare.db"));
+        manager.initialize();
+        try (var connection = manager.getConnection(); var statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TRIGGER reject_history BEFORE INSERT ON download_history
+                    BEGIN SELECT RAISE(ABORT, 'Test history write failure'); END
+                    """);
+        }
+        DownloadHistoryDao history = new DownloadHistoryDao(manager);
+        TransferService service = new TransferService(downloads, history, new FileTransferClient());
+        PeerServer server = new PeerServer(0, shared);
+        server.start();
+        try {
+            service.download(new Peer(1, "Alice", "127.0.0.1", server.port()), "sample.txt");
+            throw new AssertionError("The history failure must be reported separately.");
+        } catch (TransferService.HistoryWriteException ex) {
+            TestSupport.assertEquals(downloads.resolve("sample.txt"), ex.savedFile(), "Report the actual saved file.");
+            TestSupport.assertEquals("saved contents", Files.readString(ex.savedFile()), "History errors must preserve the file.");
+        } finally {
+            server.stop();
+        }
+        TestSupport.assertEquals(List.of(), history.findAll(), "No entry should be recorded after a failed history write.");
     }
 
     private static void testUnsafeFileNameDownloadFailure() throws Exception {

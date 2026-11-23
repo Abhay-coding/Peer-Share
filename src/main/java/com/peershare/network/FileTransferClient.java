@@ -70,7 +70,7 @@ public final class FileTransferClient {
 
             if (header.startsWith(Protocol.STATUS_ERROR)) {
                 String errorMsg = header.substring(Protocol.STATUS_ERROR.length()).trim();
-                throw new IOException("Peer returned error: " + errorMsg);
+                throw new ListRejectedException(errorMsg);
             }
 
             if (!header.startsWith(Protocol.STATUS_OK)) {
@@ -208,6 +208,21 @@ public final class FileTransferClient {
     @FunctionalInterface
     private interface SocketRequest<T> {
         T run(InputStream in, OutputStream out) throws IOException;
+    }
+
+    /** The peer replied to the list request with an error. */
+    public static final class ListRejectedException extends IOException {
+        private static final long serialVersionUID = 1L;
+        private final boolean fileLimitExceeded;
+
+        private ListRejectedException(String message) {
+            super("Peer returned error: " + message);
+            fileLimitExceeded = Protocol.ERROR_TOO_MANY_FILES.equals(message);
+        }
+
+        public boolean fileLimitExceeded() {
+            return fileLimitExceeded;
+        }
     }
 
     private static int parseCount(String header) throws IOException {

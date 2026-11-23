@@ -37,6 +37,10 @@ public final class FileScanner {
         return sharedDirectory;
     }
 
+    public static boolean isShareableName(String fileName) {
+        return !".gitkeep".equalsIgnoreCase(fileName) && InputValidator.isSafeFileName(fileName);
+    }
+
     /**
      * Scans the shared folder for direct regular files.
      * Subdirectories and nested files are ignored for safety.
@@ -58,10 +62,10 @@ public final class FileScanner {
             List<Path> entries = stream.toList();
 
             for (Path entry : entries) {
+                String fileName = entry.getFileName().toString();
                 // Only include regular files; skip subdirectories
                 if (!Files.isSymbolicLink(entry) && Files.isRegularFile(entry)
-                        && InputValidator.isSafeFileName(entry.getFileName().toString())) {
-                    String fileName = entry.getFileName().toString();
+                        && isShareableName(fileName)) {
                     long fileSize = Files.size(entry);
 
                     // Convert file modification timestamp to LocalDateTime

@@ -3,7 +3,6 @@ package com.peershare.network;
 import com.peershare.model.SharedFile;
 import com.peershare.service.FileScanner;
 import com.peershare.util.AppLogger;
-import com.peershare.util.InputValidator;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -67,7 +66,7 @@ public final class ClientHandler implements Runnable {
                 .filter(file -> file.fileSize() <= Protocol.MAX_FILE_BYTES)
                 .toList();
         if (files.size() > Protocol.MAX_LIST_FILES) {
-            Protocol.writeLine(out, Protocol.STATUS_ERROR + " Too many shared files");
+            Protocol.writeLine(out, Protocol.STATUS_ERROR + " " + Protocol.ERROR_TOO_MANY_FILES);
             return;
         }
         Protocol.writeLine(out, Protocol.STATUS_OK + " " + files.size());
@@ -78,7 +77,7 @@ public final class ClientHandler implements Runnable {
     }
 
     private void handleDownload(OutputStream out, String fileName) throws IOException {
-        if (!InputValidator.isSafeFileName(fileName)) {
+        if (!FileScanner.isShareableName(fileName)) {
             Protocol.writeLine(out, Protocol.STATUS_ERROR + " Unsafe or invalid filename");
             return;
         }

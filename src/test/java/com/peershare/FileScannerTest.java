@@ -27,6 +27,7 @@ public final class FileScannerTest {
 
         Path file2 = tempFolder.resolve("file2.txt");
         Files.writeString(file2, "Sample content for file 2");
+        Files.createFile(tempFolder.resolve(".gitkeep"));
 
         // Create a nested subdirectory with a file inside it
         Path subFolder = tempFolder.resolve("subfolder");
@@ -36,7 +37,7 @@ public final class FileScannerTest {
         FileScanner scanner = new FileScanner(tempFolder);
         List<SharedFile> files = scanner.scan();
 
-        TestSupport.assertEquals(2, files.size(), "Scanner must only return direct regular files.");
+        TestSupport.assertEquals(2, files.size(), "Scanner must only return shareable direct files.");
 
         // Check file names
         List<String> fileNames = files.stream().map(SharedFile::fileName).toList();

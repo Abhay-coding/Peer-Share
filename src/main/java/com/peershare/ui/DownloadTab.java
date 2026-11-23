@@ -4,6 +4,7 @@ import com.peershare.dao.PeerDao;
 import com.peershare.model.Peer;
 import com.peershare.model.SharedFile;
 import com.peershare.network.FileTransferClient;
+import com.peershare.network.Protocol;
 import com.peershare.service.TransferService;
 import com.peershare.util.AppLogger;
 import javafx.collections.FXCollections;
@@ -17,6 +18,10 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.util.StringConverter;
 
+import java.net.ConnectException;
+import java.net.NoRouteToHostException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.List;
@@ -25,6 +30,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.logging.Level;
 
 public final class DownloadTab extends Tab {
@@ -172,8 +178,7 @@ public final class DownloadTab extends Tab {
 
     private void listFiles(Peer peer) {
         clearFiles();
-        runTask("Looking for files on " + peer.name() + "…", "Couldn’t reach " + peer.name()
-                        + ". Check that PeerShare is open there and that the saved address and port are correct.",
+        runTask("Looking for files on " + peer.name() + "…", error -> fileListFailure(peer, error),
                 () -> client.listRemoteFiles(peer), listed -> {
                     listedPeer = peer;
                     files.setAll(listed);
@@ -186,12 +191,14 @@ public final class DownloadTab extends Tab {
         SharedFile file = table.getSelectionModel().getSelectedItem();
         AtomicBoolean cancelled = new AtomicBoolean();
         activeDownload = cancelled;
-        runTask("Downloading " + file.fileName() + "…", "Couldn’t download " + file.fileName() + ". ",
+        String failure = "Couldn’t download " + file.fileName() + ".";
+        runTask("Downloading " + file.fileName() + "…",
+                error -> error.getMessage() == null ? failure : failure + " " + error.getMessage(),
                 () -> transferService.download(peer, file.fileName(), file.fileSize(), cancelled::get),
                 path -> showFeedback("Saved " + path.getFileName() + " to downloads.", false), true);
     }
 
-    private <T> void runTask(String activity, String failure, Callable<T> action,
+    private <T> void runTask(String activity, Function<Throwable, String> failure, Callable<T> action,
                              Consumer<T> success, boolean download) {
         busy = true;
         showFeedback(activity, false);
@@ -217,9 +224,14 @@ public final class DownloadTab extends Tab {
             Throwable error = task.getException();
             if (error instanceof CancellationException) {
                 showFeedback("Download cancelled.", false);
+            } else if (error instanceof TransferService.HistoryWriteException saved) {
+                AppLogger.create().log(Level.WARNING, "Could not save download history", saved);
+                showFeedback("Saved " + saved.savedFile().getFileName()
+                        + " to downloads. Couldn’t save its history entry.", false);
             } else {
-                AppLogger.create().log(Level.WARNING, failure, error);
-                showFeedback(download && error.getMessage() != null ? failure + error.getMessage() : failure.strip(), true);
+                String message = failure.apply(error);
+                AppLogger.create().log(Level.WARNING, message, error);
+                showFeedback(message, true);
             }
             updateActions();
             if (download) {
@@ -230,6 +242,25 @@ public final class DownloadTab extends Tab {
         // Transfers finish writing their file and history before the app exits.
         worker.setDaemon(!download);
         worker.start();
+    }
+
+    private static String fileListFailure(Peer peer, Throwable error) {
+        String name = peer.name();
+        if (error instanceof FileTransferClient.ListRejectedException reply) {
+            if (reply.fileLimitExceeded()) {
+                return name + " is sharing too many files. Keep at most " + Protocol.MAX_LIST_FILES
+                        + " files in its shared folder, then try again.";
+            }
+            return name + " returned an error while listing files. Check the shared folder on that computer.";
+        }
+        if (error instanceof SocketTimeoutException) {
+            return "Timed out waiting for " + name + " to send its file list. Try refreshing.";
+        }
+        if (error instanceof ConnectException || error instanceof NoRouteToHostException
+                || error instanceof UnknownHostException) {
+            return "Couldn’t reach " + name + ". Check that PeerShare is open there and that the saved address and port are correct.";
+        }
+        return "Couldn’t read the file list from " + name + ". Try refreshing.";
     }
 
     private void clearFiles() {

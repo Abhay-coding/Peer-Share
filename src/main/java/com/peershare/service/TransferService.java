@@ -58,7 +58,7 @@ public final class TransferService {
      * @param peer the peer to download from
      * @param fileName the plain name of the file to download
      * @return the final Path of the downloaded file
-     * @throws IOException if network transfer fails or file is rejected
+     * @throws IOException if the transfer fails or history cannot be recorded
      */
     public Path download(Peer peer, String fileName) throws IOException {
         return download(peer, fileName, -1);
@@ -109,7 +109,11 @@ public final class TransferService {
             published = true;
 
             // Record successful download in SQLite
-            recordHistory(fileName, peer.name(), "SUCCESS");
+            try {
+                recordHistory(fileName, peer.name(), "SUCCESS");
+            } catch (SQLException ex) {
+                throw new HistoryWriteException(destination, ex);
+            }
 
             return destination;
 
@@ -118,7 +122,7 @@ public final class TransferService {
             if (!published) {
                 try {
                     recordHistory(fileName, peer == null ? "Unknown" : peer.name(), "FAILED");
-                } catch (IOException historyError) {
+                } catch (SQLException historyError) {
                     e.addSuppressed(historyError);
                 }
             }
@@ -141,11 +145,22 @@ public final class TransferService {
         }
     }
 
-    private void recordHistory(String fileName, String peerName, String status) throws IOException {
-        try {
-            historyDao.create(new DownloadHistory(0, fileName, peerName, LocalDateTime.now(), status));
-        } catch (SQLException e) {
-            throw new IOException("Transfer finished, but history could not be saved: " + e.getMessage(), e);
+    private void recordHistory(String fileName, String peerName, String status) throws SQLException {
+        historyDao.create(new DownloadHistory(0, fileName, peerName, LocalDateTime.now(), status));
+    }
+
+    /** The file was saved, but the corresponding history entry could not be recorded. */
+    public static final class HistoryWriteException extends IOException {
+        private static final long serialVersionUID = 1L;
+        private final Path savedFile;
+
+        private HistoryWriteException(Path savedFile, SQLException cause) {
+            super("The file was saved, but download history could not be updated.", cause);
+            this.savedFile = savedFile;
+        }
+
+        public Path savedFile() {
+            return savedFile;
         }
     }
 }

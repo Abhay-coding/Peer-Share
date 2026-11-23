@@ -29,6 +29,8 @@ if ($mainSources) {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
+Copy-Item -Path 'src\main\resources\*' -Destination 'out\main' -Recurse -Force -ErrorAction Stop
+
 $testSources = Get-ChildItem -Recurse 'src\test\java' -Filter '*.java' | ForEach-Object FullName
 if ($testSources) {
     $testCp = if ($extraCp) { "out\main;$extraCp" } else { "out\main" }

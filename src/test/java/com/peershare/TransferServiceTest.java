@@ -6,12 +6,20 @@ import com.peershare.model.DownloadHistory;
 import com.peershare.model.Peer;
 import com.peershare.network.FileTransferClient;
 import com.peershare.network.PeerServer;
+import com.peershare.network.Protocol;
 import com.peershare.service.TransferService;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 
 public final class TransferServiceTest {
     private TransferServiceTest() {
@@ -22,6 +30,7 @@ public final class TransferServiceTest {
         testUnsafeFileNameDownloadFailure();
         testMissingFileDownloadFailure();
         testExistingDownloadIsPreserved();
+        testFileCreatedDuringDownloadIsPreserved();
         testRejectedNameCannotDeleteAnotherPartFile();
     }
 
@@ -155,6 +164,50 @@ public final class TransferServiceTest {
             TestSupport.assertEquals("keep this", Files.readString(downloads.resolve("same.txt")),
                     "Existing data must not be overwritten.");
         }
+    }
+
+    private static void testFileCreatedDuringDownloadIsPreserved() throws Exception {
+        Path downloads = Files.createTempDirectory("peershare-conflicting-download");
+        Path destination = downloads.resolve("same.txt");
+        Path db = Files.createTempDirectory("peershare-conflicting-db");
+        DatabaseManager manager = new DatabaseManager(db.resolve("peershare.db"));
+        manager.initialize();
+        DownloadHistoryDao history = new DownloadHistoryDao(manager);
+        TransferService service = new TransferService(downloads, history, new FileTransferClient());
+        byte[] bytes = "incoming file".getBytes(StandardCharsets.UTF_8);
+        String checksum = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            server.setSoTimeout(5000);
+            FutureTask<Void> reply = new FutureTask<>(() -> {
+                try (var client = server.accept()) {
+                    client.setSoTimeout(5000);
+                    TestSupport.assertEquals("DOWNLOAD same.txt", Protocol.readLine(client.getInputStream()),
+                            "The transfer must start before the destination is created.");
+                    Files.writeString(destination, "keep this");
+                    Protocol.writeLine(client.getOutputStream(), "OK " + bytes.length + " " + checksum);
+                    client.getOutputStream().write(bytes);
+                }
+                return null;
+            });
+            new Thread(reply, "TransferServiceTest-Peer").start();
+            Peer peer = new Peer(1, "Alice", server.getInetAddress().getHostAddress(), server.getLocalPort());
+            try {
+                service.download(peer, "same.txt", bytes.length);
+                throw new AssertionError("A file created during download must be preserved.");
+            } catch (IOException expected) {
+                TestSupport.assertTrue(expected.getMessage().contains("Download already exists"),
+                        "The transfer should report a destination conflict.");
+            } finally {
+                reply.get(6, TimeUnit.SECONDS);
+            }
+        }
+
+        TestSupport.assertEquals("keep this", Files.readString(destination), "Concurrent file must not be overwritten.");
+        try (var entries = Files.list(downloads)) {
+            TestSupport.assertEquals(List.of(destination), entries.toList(), "The temporary download must be removed.");
+        }
+        TestSupport.assertEquals("FAILED", history.findAll().get(0).status(), "The conflict must be recorded as failed.");
     }
 
     private static void testRejectedNameCannotDeleteAnotherPartFile() throws Exception {

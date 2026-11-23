@@ -44,6 +44,8 @@ if [ -n "$MAIN_SOURCES" ]; then
   fi
 fi
 
+cp -R src/main/resources/. out/main/
+
 TEST_SOURCES=$(find src/test/java -name '*.java' 2>/dev/null || true)
 if [ -n "$TEST_SOURCES" ]; then
   TEST_CP="out/main"

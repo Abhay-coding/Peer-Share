@@ -6,261 +6,244 @@ import com.peershare.model.SharedFile;
 import com.peershare.network.FileTransferClient;
 import com.peershare.service.TransferService;
 import com.peershare.util.AppLogger;
-import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.concurrent.Task;
-import javafx.geometry.Insets;
-import javafx.geometry.Pos;
 import javafx.scene.control.*;
-import javafx.scene.layout.*;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.MouseButton;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.VBox;
 import javafx.util.StringConverter;
 
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.Callable;
+import java.util.function.Consumer;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 
-/**
- * DownloadTab allows the user to browse a remote peer's shared files and download them.
- */
 public final class DownloadTab extends Tab {
-    private static final Logger LOGGER = AppLogger.create();
-
     private final PeerDao peerDao;
     private final FileTransferClient client;
     private final TransferService transferService;
-
-    private final ComboBox<Peer> peerSelector = new ComboBox<>();
-    private final ObservableList<Peer> peerList = FXCollections.observableArrayList();
-    private final ObservableList<SharedFile> remoteFileList = FXCollections.observableArrayList();
-    private final TableView<SharedFile> remoteTable = new TableView<>();
-
-    private final Button viewFilesButton = new Button("View Peer Files");
-    private final Button downloadButton = new Button("Download Selected File");
-    private final Button refreshPeersButton = new Button("Refresh Peers");
-
-    private final ProgressIndicator progress = new ProgressIndicator();
-    private final Label statusLabel = new Label("Select a peer and click 'View Peer Files'.");
+    private final Runnable transferFinished;
+    private final ComboBox<Peer> selector = new ComboBox<>();
+    private final ObservableList<Peer> peers = FXCollections.observableArrayList();
+    private final ObservableList<SharedFile> files = FXCollections.observableArrayList();
+    private final TableView<SharedFile> table = new TableView<>();
+    private final Button reload = ViewParts.button("Refresh files", "secondary-button");
+    private final Button getFile = ViewParts.button("Download file", "primary-button");
+    private final ProgressBar progress = new ProgressBar(ProgressBar.INDETERMINATE_PROGRESS);
+    private final Label feedback = ViewParts.label("", "secondary-text");
+    private final Label guidance = ViewParts.label("", "secondary-text");
     private Peer listedPeer;
+    private boolean busy;
+    private boolean refreshingPeers;
 
-    public DownloadTab(PeerDao peerDao, FileTransferClient client, TransferService transferService) {
+    public DownloadTab(PeerDao peerDao, FileTransferClient client, TransferService transferService,
+                       Path downloadDirectory, Runnable addPeer, Runnable transferFinished) {
         super("Download");
         this.peerDao = peerDao;
         this.client = client;
         this.transferService = transferService;
-        setClosable(false);
+        this.transferFinished = transferFinished;
 
-        setContent(createContent());
-        refreshPeerSelector();
-    }
-
-    private Pane createContent() {
-        VBox root = new VBox(15);
-        root.setPadding(new Insets(15));
-
-        progress.setVisible(false);
-        progress.setPrefSize(20, 20);
-
-        // Peer Selector Configuration
-        peerSelector.setItems(peerList);
-        peerSelector.valueProperty().addListener((obs, oldPeer, newPeer) -> {
-            listedPeer = null;
-            remoteFileList.clear();
-            downloadButton.setDisable(true);
-        });
-        downloadButton.setDisable(true);
-        peerSelector.setPromptText("Select a Peer...");
-        peerSelector.setConverter(new StringConverter<>() {
+        selector.setItems(peers);
+        selector.setPromptText("Choose a saved peer");
+        selector.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(selector, Priority.ALWAYS);
+        selector.setConverter(new StringConverter<>() {
             @Override
             public String toString(Peer peer) {
-                if (peer == null) return "";
-                return peer.name() + " (" + peer.ipAddress() + ":" + peer.port() + ")";
+                return peer == null ? "" : peer.name() + "  (" + peer.ipAddress() + ":" + peer.port() + ")";
             }
 
             @Override
-            public Peer fromString(String string) {
+            public Peer fromString(String text) {
                 return null;
             }
         });
+        selector.valueProperty().addListener((obs, oldPeer, peer) -> {
+            if (!refreshingPeers && !Objects.equals(oldPeer, peer)) {
+                if (peer == null) {
+                    clearFiles();
+                    updateActions();
+                } else {
+                    listFiles(peer);
+                }
+            }
+        });
 
-        viewFilesButton.setOnAction(e -> handleViewRemoteFiles());
-        refreshPeersButton.setOnAction(e -> refreshPeerSelector());
-        downloadButton.setOnAction(e -> handleDownloadSelectedFile());
+        reload.setOnAction(event -> listFiles(selector.getValue()));
+        getFile.setOnAction(event -> downloadFile());
+        table.getSelectionModel().selectedItemProperty().addListener((obs, previous, selected) -> updateActions());
+        table.setOnKeyPressed(event -> {
+            if (event.getCode() == KeyCode.ENTER && !getFile.isDisabled()) {
+                getFile.fire();
+                event.consume();
+            }
+        });
+        table.setRowFactory(view -> {
+            TableRow<SharedFile> row = new TableRow<>();
+            row.setOnMouseClicked(event -> {
+                if (event.getButton() == MouseButton.PRIMARY && event.getClickCount() == 2 && !row.isEmpty()) {
+                    getFile.fire();
+                }
+            });
+            return row;
+        });
 
-        HBox topBar = new HBox(10, new Label("Remote Peer:"), peerSelector, viewFilesButton, refreshPeersButton);
-        topBar.setAlignment(Pos.CENTER_LEFT);
+        SharedFilesTab.setUpFileTable(table);
+        TextField search = ViewParts.searchable(table, files, "Search files", "", SharedFile::fileName);
+        Label empty = (Label) table.getPlaceholder();
+        empty.textProperty().unbind();
+        empty.textProperty().bind(guidance.textProperty());
 
-        setupTable();
-        VBox.setVgrow(remoteTable, Priority.ALWAYS);
+        Button editPeers = ViewParts.button("Manage peers", "secondary-button");
+        editPeers.setOnAction(event -> addPeer.run());
+        VBox source = new VBox(8, ViewParts.fieldLabel("Download from", selector), ViewParts.row(selector, editPeers));
+        source.getStyleClass().add("form-panel");
 
-        HBox bottomBar = new HBox(12, downloadButton, progress, statusLabel);
-        bottomBar.setAlignment(Pos.CENTER_LEFT);
-
-        root.getChildren().addAll(topBar, remoteTable, bottomBar);
-        return root;
-    }
-
-    private void setupTable() {
-        TableColumn<SharedFile, String> nameCol = new TableColumn<>("File Name");
-        nameCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().fileName()));
-        nameCol.setPrefWidth(280);
-
-        TableColumn<SharedFile, String> sizeCol = new TableColumn<>("Size");
-        sizeCol.setCellValueFactory(data -> new SimpleStringProperty(formatBytes(data.getValue().fileSize())));
-        sizeCol.setPrefWidth(120);
-
-        TableColumn<SharedFile, String> dateCol = new TableColumn<>("Last Modified");
-        dateCol.setCellValueFactory(data -> new SimpleStringProperty(
-                data.getValue().lastModified() != null
-                        ? data.getValue().lastModified().toString().replace('T', ' ')
-                        : ""));
-        dateCol.setPrefWidth(200);
-
-        remoteTable.getColumns().addAll(nameCol, sizeCol, dateCol);
-        remoteTable.setItems(remoteFileList);
-        remoteTable.setPlaceholder(new Label("No remote files listed. Select a peer and click 'View Peer Files'."));
+        Button openFolder = ViewParts.folderButton("Open downloads", downloadDirectory, feedback);
+        progress.setPrefWidth(95);
+        progress.managedProperty().bind(progress.visibleProperty());
+        feedback.setWrapText(true);
+        setContent(ViewParts.page(source, ViewParts.row(search, ViewParts.spacer(), reload), table,
+                ViewParts.row(getFile, openFolder, ViewParts.spacer(), progress), feedback));
+        updateActions();
     }
 
     public void refreshPeerSelector() {
+        if (busy) {
+            return;
+        }
+        Peer previous = selector.getValue();
         try {
-            Peer current = peerSelector.getValue();
-            peerList.setAll(peerDao.findAll());
-            if (current != null) {
-                for (Peer p : peerList) {
-                    if (p.id() == current.id()) {
-                        peerSelector.setValue(p);
-                        break;
-                    }
+            List<Peer> saved = peerDao.findAll();
+            if (peers.equals(saved)) {
+                return;
+            }
+            Peer current = saved.stream().filter(peer -> previous != null && peer.id() == previous.id())
+                    .findFirst().orElse(null);
+            refreshingPeers = true;
+            try {
+                peers.setAll(saved);
+                selector.setValue(current);
+            } finally {
+                refreshingPeers = false;
+            }
+            if (!Objects.equals(previous, current)) {
+                clearFiles();
+                if (current != null) {
+                    listFiles(current);
                 }
             }
         } catch (SQLException ex) {
-            LOGGER.log(Level.SEVERE, "Failed to load peers for dropdown", ex);
+            AppLogger.create().log(Level.WARNING, "Could not load peers", ex);
+            showFeedback("Couldn’t load saved peers. Try opening Download again.", true);
         }
+        updateActions();
     }
 
-    private void handleViewRemoteFiles() {
-        Peer peer = peerSelector.getValue();
-        if (peer == null) {
-            showAlert(Alert.AlertType.WARNING, "Peer Selection Required", "Please select a peer from the dropdown list.");
+    public void browse(Peer peer) {
+        if (busy || peer == null || !peers.contains(peer)) {
             return;
         }
-
-        listedPeer = null;
-        remoteFileList.clear();
-        viewFilesButton.setDisable(true);
-        downloadButton.setDisable(true);
-        progress.setVisible(true);
-        statusLabel.setText("Connecting to " + peer.name() + " (" + peer.ipAddress() + ":" + peer.port() + ")...");
-
-        Task<List<SharedFile>> task = new Task<>() {
-            @Override
-            protected List<SharedFile> call() throws Exception {
-                return client.listRemoteFiles(peer);
-            }
-        };
-
-        task.setOnSucceeded(e -> {
-            if (!peer.equals(peerSelector.getValue())) {
-                viewFilesButton.setDisable(false);
-                progress.setVisible(false);
-                return;
-            }
-            remoteFileList.setAll(task.getValue());
-            listedPeer = peer;
-            statusLabel.setText("Found " + remoteFileList.size() + " file(s) on " + peer.name());
-            viewFilesButton.setDisable(false);
-            downloadButton.setDisable(remoteFileList.isEmpty());
-            progress.setVisible(false);
-        });
-
-        task.setOnFailed(e -> {
-            Throwable ex = task.getException();
-            LOGGER.log(Level.WARNING, "Failed connecting to peer for file list", ex);
-            statusLabel.setText("Connection failed: " + ex.getMessage());
-            viewFilesButton.setDisable(false);
-            downloadButton.setDisable(true);
-            progress.setVisible(false);
-
-            showAlert(Alert.AlertType.ERROR, "Connection Error",
-                    "Could not retrieve files from peer " + peer.name() + ":\n" + ex.getMessage());
-        });
-
-        Thread thread = new Thread(task, "DownloadTab-ListFilesTask");
-        thread.setDaemon(true);
-        thread.start();
-    }
-
-    private void handleDownloadSelectedFile() {
-        Peer peer = peerSelector.getValue();
-        SharedFile file = remoteTable.getSelectionModel().getSelectedItem();
-
-        if (peer == null || !peer.equals(listedPeer)) {
-            showAlert(Alert.AlertType.WARNING, "Peer Selection Required", "Please select a peer.");
-            return;
-        }
-
-        if (file == null) {
-            showAlert(Alert.AlertType.WARNING, "File Selection Required", "Please select a file to download.");
-            return;
-        }
-
-        viewFilesButton.setDisable(true);
-        downloadButton.setDisable(true);
-        progress.setVisible(true);
-        statusLabel.setText("Downloading " + file.fileName() + " from " + peer.name() + "...");
-
-        Task<Path> task = new Task<>() {
-            @Override
-            protected Path call() throws Exception {
-                return transferService.download(peer, file.fileName(), file.fileSize());
-            }
-        };
-
-        task.setOnSucceeded(e -> {
-            Path target = task.getValue();
-            statusLabel.setText("Successfully downloaded: " + target.getFileName());
-            viewFilesButton.setDisable(false);
-            downloadButton.setDisable(!peer.equals(listedPeer));
-            progress.setVisible(false);
-
-            showAlert(Alert.AlertType.INFORMATION, "Download Complete",
-                    "File '" + file.fileName() + "' was successfully downloaded to:\n" + target.toAbsolutePath());
-        });
-
-        task.setOnFailed(e -> {
-            Throwable ex = task.getException();
-            LOGGER.log(Level.WARNING, "Download failed", ex);
-            statusLabel.setText("Download failed: " + ex.getMessage());
-            viewFilesButton.setDisable(false);
-            downloadButton.setDisable(!peer.equals(listedPeer));
-            progress.setVisible(false);
-
-            showAlert(Alert.AlertType.ERROR, "Download Failed",
-                    "Could not download '" + file.fileName() + "' from " + peer.name() + ":\n" + ex.getMessage());
-        });
-
-        Thread thread = new Thread(task, "DownloadTab-DownloadTask");
-        // Let an in-progress transfer finish and write history before the JVM exits.
-        thread.start();
-    }
-
-    private void showAlert(Alert.AlertType type, String title, String message) {
-        Alert alert = new Alert(type);
-        alert.setTitle(title);
-        alert.setHeaderText(null);
-        alert.setContentText(message);
-        alert.showAndWait();
-    }
-
-    private static String formatBytes(long bytes) {
-        if (bytes < 1024) {
-            return bytes + " B";
-        } else if (bytes < 1024 * 1024) {
-            return String.format("%.1f KB", bytes / 1024.0);
+        if (peer.equals(selector.getValue())) {
+            listFiles(peer);
         } else {
-            return String.format("%.2f MB", bytes / (1024.0 * 1024.0));
+            selector.setValue(peer);
         }
+    }
+
+    private void listFiles(Peer peer) {
+        clearFiles();
+        runTask("Looking for files on " + peer.name() + "…", "Couldn’t reach " + peer.name()
+                        + ". Check that PeerShare is open there and that the saved address and port are correct.",
+                () -> client.listRemoteFiles(peer), listed -> {
+                    listedPeer = peer;
+                    files.setAll(listed);
+                    showFeedback(files.size() == 1 ? "1 file available" : files.size() + " files available", false);
+                }, false);
+    }
+
+    private void downloadFile() {
+        Peer peer = listedPeer;
+        SharedFile file = table.getSelectionModel().getSelectedItem();
+        runTask("Downloading " + file.fileName() + "…", "Couldn’t download " + file.fileName() + ". ",
+                () -> transferService.download(peer, file.fileName(), file.fileSize()),
+                path -> showFeedback("Saved " + path.getFileName() + " to downloads.", false), true);
+    }
+
+    private <T> void runTask(String activity, String failure, Callable<T> action,
+                             Consumer<T> success, boolean download) {
+        busy = true;
+        showFeedback(activity, false);
+        updateActions();
+        Task<T> task = new Task<>() {
+            @Override
+            protected T call() throws Exception {
+                return action.call();
+            }
+        };
+        task.setOnSucceeded(event -> {
+            busy = false;
+            success.accept(task.getValue());
+            updateActions();
+            if (download) {
+                transferFinished.run();
+            }
+        });
+        task.setOnFailed(event -> {
+            busy = false;
+            Throwable error = task.getException();
+            AppLogger.create().log(Level.WARNING, failure, error);
+            showFeedback(download && error.getMessage() != null ? failure + error.getMessage() : failure.strip(), true);
+            updateActions();
+            if (download) {
+                transferFinished.run();
+            }
+        });
+        Thread worker = new Thread(task, download ? "DownloadTab-Transfer" : "DownloadTab-ListFiles");
+        // Transfers finish writing their file and history before the app exits.
+        worker.setDaemon(!download);
+        worker.start();
+    }
+
+    private void clearFiles() {
+        listedPeer = null;
+        files.clear();
+        showFeedback("", false);
+    }
+
+    private void updateActions() {
+        boolean selected = selector.getValue() != null;
+        selector.setDisable(busy || peers.isEmpty());
+        reload.setDisable(busy || !selected);
+        getFile.setDisable(busy || listedPeer == null || table.getSelectionModel().getSelectedItem() == null);
+        progress.setVisible(busy);
+        if (!files.isEmpty()) {
+            guidance.setText("No matches. Try a different search.");
+        } else if (listedPeer != null) {
+            guidance.setText("This peer has no files available to download.");
+        } else if (busy) {
+            guidance.setText("Waiting for the file list…");
+        } else if (selected) {
+            guidance.setText("Use Refresh files to try again.");
+        } else {
+            guidance.setText(peers.isEmpty() ? "Add a computer under Manage peers to get started."
+                    : "Choose a saved peer to see its files.");
+        }
+    }
+
+    private void showFeedback(String text, boolean error) {
+        feedback.getStyleClass().remove("error-text");
+        if (error) {
+            feedback.getStyleClass().add("error-text");
+        }
+        feedback.setText(text);
     }
 }

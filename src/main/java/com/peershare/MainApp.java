@@ -73,12 +73,12 @@ public final class MainApp extends Application {
                 peerServer
         );
 
-        Scene scene = new Scene(mainView, 850, 600);
+        Scene scene = new Scene(mainView, 1040, 680);
 
-        primaryStage.setTitle("PeerShare — P2P File Sharing Application");
+        primaryStage.setTitle("PeerShare");
         primaryStage.setScene(scene);
-        primaryStage.setMinWidth(650);
-        primaryStage.setMinHeight(450);
+        primaryStage.setMinWidth(760);
+        primaryStage.setMinHeight(510);
         primaryStage.show();
 
         LOGGER.info("PeerShare GUI launched successfully.");

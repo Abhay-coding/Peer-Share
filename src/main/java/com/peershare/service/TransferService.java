@@ -9,9 +9,9 @@ import com.peershare.util.AppLogger;
 import com.peershare.util.InputValidator;
 
 import java.io.IOException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.logging.Level;
@@ -20,7 +20,7 @@ import java.util.logging.Logger;
 /**
  * TransferService manages the downloading of files from remote peers.
  * It coordinates with FileTransferClient, writes files to a temporary .part
- * location, moves them into place upon verification, and attempts to log
+ * location, publishes them upon verification, and attempts to log
  * each outcome (SUCCESS or FAILED) in the local SQLite database.
  */
 public final class TransferService {
@@ -50,7 +50,7 @@ public final class TransferService {
 
     /**
      * Downloads a file from a remote peer, validates the filename, streams bytes
-     * to a temporary .part file, moves it to the final download path, and records
+     * to a temporary .part file, publishes it at the final download path, and records
      * the result in download history.
      *
      * @param peer the peer to download from
@@ -89,9 +89,14 @@ public final class TransferService {
 
             client.download(peer, fileName, tempFile, expectedSize);
 
-            // Move within the same folder; replace if target already exists (TOCTOU fix).
-            Files.move(tempFile, destination, StandardCopyOption.REPLACE_EXISTING);
-            tempFile = null;
+            // Create the final name in one operation. Another download may have claimed it.
+            try {
+                Files.createLink(destination, tempFile);
+            } catch (FileAlreadyExistsException ex) {
+                throw new IOException("Download already exists: " + fileName, ex);
+            } catch (UnsupportedOperationException ex) {
+                throw new IOException("The downloads folder must support hard links.", ex);
+            }
             published = true;
 
             // Record successful download in SQLite
@@ -100,15 +105,6 @@ public final class TransferService {
             return destination;
 
         } catch (Exception e) {
-            // Clean up any incomplete .part file
-            if (tempFile != null) {
-                try {
-                    Files.deleteIfExists(tempFile);
-                } catch (IOException cleanupEx) {
-                    LOGGER.log(Level.WARNING, "Failed to clean up temp file", cleanupEx);
-                }
-            }
-
             // A published file remains a successful transfer even if history storage fails.
             if (!published) {
                 try {
@@ -124,6 +120,14 @@ public final class TransferService {
                 throw re;
             } else {
                 throw new IOException("Download failed: " + e.getMessage(), e);
+            }
+        } finally {
+            if (tempFile != null) {
+                try {
+                    Files.deleteIfExists(tempFile);
+                } catch (IOException cleanupEx) {
+                    LOGGER.log(Level.WARNING, "Failed to clean up temp file", cleanupEx);
+                }
             }
         }
     }

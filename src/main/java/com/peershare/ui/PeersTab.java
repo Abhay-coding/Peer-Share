@@ -5,250 +5,220 @@ import com.peershare.model.Peer;
 import com.peershare.util.AppLogger;
 import com.peershare.util.InputValidator;
 import javafx.beans.property.SimpleIntegerProperty;
-import javafx.beans.property.SimpleLongProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.concurrent.Task;
-import javafx.geometry.Insets;
-import javafx.geometry.Pos;
 import javafx.scene.control.*;
-import javafx.scene.layout.*;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.MouseButton;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.VBox;
 
-import java.sql.SQLException;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.function.Consumer;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 
-/**
- * PeersTab allows the user to manage saved peers (Create, Read, Update, Delete).
- */
 public final class PeersTab extends Tab {
-    private static final Logger LOGGER = AppLogger.create();
-
     private final PeerDao peerDao;
-    private final ObservableList<Peer> peerList = FXCollections.observableArrayList();
+    private final ObservableList<Peer> peers = FXCollections.observableArrayList();
+    private final TableView<Peer> table = new TableView<>();
+    private final TextField name = new TextField();
+    private final TextField address = new TextField();
+    private final TextField port = new TextField();
+    private final Label formTitle = ViewParts.label("Add a peer", "section-title");
+    private final Label feedback = ViewParts.label("", "secondary-text");
+    private final Button save = ViewParts.button("Add peer", "primary-button");
+    private final Button clear = ViewParts.button("Clear", "secondary-button");
+    private final Button remove = ViewParts.button("Remove", "danger-button");
+    private final Button browse = ViewParts.button("Browse files", "secondary-button");
+    private boolean busy;
 
-    private final TableView<Peer> peerTable = new TableView<>();
-    private final TextField nameField = new TextField();
-    private final TextField ipField = new TextField();
-    private final TextField portField = new TextField();
-
-    private Peer selectedPeer = null;
-
-    public PeersTab(PeerDao peerDao) {
+    public PeersTab(PeerDao peerDao, Consumer<Peer> browsePeer) {
         super("Peers");
         this.peerDao = peerDao;
-        setClosable(false);
+        setUpTable();
 
-        setContent(createContent());
-        refreshPeers();
-    }
+        name.setPromptText("Studio PC");
+        address.setPromptText("192.168.1.10");
+        port.setPromptText("5000");
+        VBox nameInput = new VBox(5, ViewParts.fieldLabel("Name", name), name);
+        VBox addressInput = new VBox(5, ViewParts.fieldLabel("IP address or hostname", address), address);
+        VBox portInput = new VBox(5, ViewParts.fieldLabel("Port", port), port);
+        HBox.setHgrow(nameInput, Priority.ALWAYS);
+        HBox.setHgrow(addressInput, Priority.ALWAYS);
+        portInput.setPrefWidth(90);
+        portInput.setMaxWidth(110);
 
-    private Pane createContent() {
-        VBox root = new VBox(15);
-        root.setPadding(new Insets(15));
-
-        // Form Section
-        GridPane formGrid = new GridPane();
-        formGrid.setHgap(10);
-        formGrid.setVgap(10);
-        formGrid.setAlignment(Pos.CENTER_LEFT);
-
-        nameField.setPromptText("Peer Name (e.g. Rahul)");
-        ipField.setPromptText("IP Address or Hostname (e.g. 127.0.0.1)");
-        portField.setPromptText("Port (1 - 65535)");
-
-        formGrid.add(new Label("Peer Name:"), 0, 0);
-        formGrid.add(nameField, 1, 0);
-        formGrid.add(new Label("IP Address:"), 0, 1);
-        formGrid.add(ipField, 1, 1);
-        formGrid.add(new Label("Port:"), 0, 2);
-        formGrid.add(portField, 1, 2);
-
-        // Buttons
-        Button addButton = new Button("Add Peer");
-        Button updateButton = new Button("Update Selected");
-        Button deleteButton = new Button("Delete Selected");
-        Button clearButton = new Button("Clear Form");
-
-        addButton.setOnAction(e -> handleAddPeer());
-        updateButton.setOnAction(e -> handleUpdatePeer());
-        deleteButton.setOnAction(e -> handleDeletePeer());
-        clearButton.setOnAction(e -> clearForm());
-
-        HBox buttonBar = new HBox(10, addButton, updateButton, deleteButton, clearButton);
-        buttonBar.setAlignment(Pos.CENTER_LEFT);
-
-        // Table setup
-        setupTable();
-
-        VBox.setVgrow(peerTable, Priority.ALWAYS);
-        root.getChildren().addAll(new Label("Manage Saved Peers:"), formGrid, buttonBar, peerTable);
-        return root;
-    }
-
-    private void setupTable() {
-        TableColumn<Peer, Number> idCol = new TableColumn<>("ID");
-        idCol.setCellValueFactory(data -> new SimpleLongProperty(data.getValue().id()));
-        idCol.setPrefWidth(60);
-
-        TableColumn<Peer, String> nameCol = new TableColumn<>("Name");
-        nameCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().name()));
-        nameCol.setPrefWidth(160);
-
-        TableColumn<Peer, String> ipCol = new TableColumn<>("IP Address");
-        ipCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().ipAddress()));
-        ipCol.setPrefWidth(160);
-
-        TableColumn<Peer, Number> portCol = new TableColumn<>("Port");
-        portCol.setCellValueFactory(data -> new SimpleIntegerProperty(data.getValue().port()));
-        portCol.setPrefWidth(100);
-
-        peerTable.getColumns().addAll(idCol, nameCol, ipCol, portCol);
-        peerTable.setItems(peerList);
-        peerTable.setPlaceholder(new Label("No peers saved. Add a peer above."));
-
-        peerTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) -> {
-            selectedPeer = newVal;
-            if (newVal != null) {
-                nameField.setText(newVal.name());
-                ipField.setText(newVal.ipAddress());
-                portField.setText(String.valueOf(newVal.port()));
-            }
-        });
-    }
-
-    private void handleAddPeer() {
-        try {
-            InputValidator.validatePeer(nameField.getText(), ipField.getText(), portField.getText());
-            int port = InputValidator.parsePort(portField.getText());
-
-            Peer peer = new Peer(0, nameField.getText().trim(), ipField.getText().trim(), port);
-
-            Task<Peer> task = new Task<>() {
-                @Override
-                protected Peer call() throws SQLException {
-                    return peerDao.create(peer);
-                }
-            };
-
-            task.setOnSucceeded(e -> {
-                refreshPeers();
-                clearForm();
-            });
-
-            task.setOnFailed(e -> {
-                Throwable ex = task.getException();
-                LOGGER.log(Level.SEVERE, "Failed to create peer", ex);
-                showAlert(Alert.AlertType.ERROR, "Database Error", "Could not save peer: " + ex.getMessage());
-            });
-
-            new Thread(task, "PeersTab-AddPeerTask").start();
-        } catch (IllegalArgumentException ex) {
-            showAlert(Alert.AlertType.WARNING, "Validation Error", ex.getMessage());
-        }
-    }
-
-    private void handleUpdatePeer() {
-        if (selectedPeer == null) {
-            showAlert(Alert.AlertType.WARNING, "Selection Required", "Please select a peer to update.");
-            return;
-        }
-
-        try {
-            InputValidator.validatePeer(nameField.getText(), ipField.getText(), portField.getText());
-            int port = InputValidator.parsePort(portField.getText());
-
-            Peer updated = new Peer(selectedPeer.id(), nameField.getText().trim(), ipField.getText().trim(), port);
-
-            Task<Void> task = new Task<>() {
-                @Override
-                protected Void call() throws SQLException {
-                    peerDao.update(updated);
-                    return null;
-                }
-            };
-
-            task.setOnSucceeded(e -> {
-                refreshPeers();
-                clearForm();
-            });
-
-            task.setOnFailed(e -> {
-                Throwable ex = task.getException();
-                LOGGER.log(Level.SEVERE, "Failed to update peer", ex);
-                showAlert(Alert.AlertType.ERROR, "Database Error", "Could not update peer: " + ex.getMessage());
-            });
-
-            new Thread(task, "PeersTab-UpdatePeerTask").start();
-        } catch (IllegalArgumentException ex) {
-            showAlert(Alert.AlertType.WARNING, "Validation Error", ex.getMessage());
-        }
-    }
-
-    private void handleDeletePeer() {
-        if (selectedPeer == null) {
-            showAlert(Alert.AlertType.WARNING, "Selection Required", "Please select a peer to delete.");
-            return;
-        }
-
-        Task<Void> task = new Task<>() {
-            @Override
-            protected Void call() throws SQLException {
-                peerDao.deleteById(selectedPeer.id());
-                return null;
-            }
-        };
-
-        task.setOnSucceeded(e -> {
-            refreshPeers();
+        save.setOnAction(event -> savePeer());
+        port.setOnAction(event -> save.fire());
+        clear.setOnAction(event -> {
             clearForm();
+            name.requestFocus();
         });
-
-        task.setOnFailed(e -> {
-            Throwable ex = task.getException();
-            LOGGER.log(Level.SEVERE, "Failed to delete peer", ex);
-            showAlert(Alert.AlertType.ERROR, "Database Error", "Could not delete peer: " + ex.getMessage());
+        browse.setOnAction(event -> browsePeer.accept(selectedPeer()));
+        table.setOnKeyPressed(event -> {
+            if (event.getCode() == KeyCode.ENTER && !browse.isDisabled()) {
+                browse.fire();
+                event.consume();
+            }
         });
+        table.setRowFactory(view -> {
+            TableRow<Peer> row = new TableRow<>();
+            row.setOnMouseClicked(event -> {
+                if (event.getButton() == MouseButton.PRIMARY && event.getClickCount() == 2 && !row.isEmpty()) {
+                    browse.fire();
+                }
+            });
+            return row;
+        });
+        remove.setOnAction(event -> removePeer());
+        feedback.setWrapText(true);
+        VBox form = new VBox(10, formTitle, ViewParts.row(nameInput, addressInput, portInput),
+                ViewParts.row(save, clear, feedback));
+        form.getStyleClass().add("form-panel");
 
-        new Thread(task, "PeersTab-DeletePeerTask").start();
+        TextField search = ViewParts.searchable(table, peers, "Find a peer",
+                "No saved peers yet. Add one above to browse its files.",
+                peer -> peer.name() + " " + peer.ipAddress() + " " + peer.port());
+        setContent(ViewParts.page(form, ViewParts.row(search, ViewParts.spacer(), browse, remove), table));
+        updateActions();
+    }
+
+    private void setUpTable() {
+        TableColumn<Peer, String> nameColumn = new TableColumn<>("Name");
+        nameColumn.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().name()));
+        nameColumn.setPrefWidth(245);
+        TableColumn<Peer, String> addressColumn = new TableColumn<>("Address");
+        addressColumn.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().ipAddress()));
+        addressColumn.setPrefWidth(240);
+        TableColumn<Peer, Number> portColumn = new TableColumn<>("Port");
+        portColumn.setCellValueFactory(data -> new SimpleIntegerProperty(data.getValue().port()));
+        portColumn.setPrefWidth(90);
+        table.getColumns().setAll(List.of(nameColumn, addressColumn, portColumn));
+        table.getSelectionModel().selectedItemProperty().addListener((obs, oldPeer, peer) -> {
+            name.setText(peer == null ? "" : peer.name());
+            address.setText(peer == null ? "" : peer.ipAddress());
+            port.setText(peer == null ? "" : String.valueOf(peer.port()));
+            showFeedback("", false);
+            updateActions();
+        });
+    }
+
+    private Peer selectedPeer() {
+        return table.getSelectionModel().getSelectedItem();
+    }
+
+    private void updateActions() {
+        boolean selected = selectedPeer() != null;
+        formTitle.setText(selected ? "Edit peer" : "Add a peer");
+        save.setText(selected ? "Save changes" : "Add peer");
+        browse.setDisable(busy || !selected);
+        remove.setDisable(busy || !selected);
+        save.setDisable(busy);
+        clear.setDisable(busy);
+        table.setDisable(busy);
+        name.setDisable(busy);
+        address.setDisable(busy);
+        port.setDisable(busy);
+    }
+
+    private void savePeer() {
+        int portNumber;
+        try {
+            InputValidator.validatePeer(name.getText(), address.getText(), port.getText());
+            portNumber = InputValidator.parsePort(port.getText());
+        } catch (IllegalArgumentException ex) {
+            showFeedback(ex.getMessage(), true);
+            TextField invalid = name.getText().isBlank() ? name : address.getText().isBlank() ? address : port;
+            invalid.requestFocus();
+            return;
+        }
+
+        Peer selected = selectedPeer();
+        Peer peer = new Peer(selected == null ? 0 : selected.id(), name.getText().strip(), address.getText().strip(), portNumber);
+        runChange(() -> {
+            if (selected == null) {
+                return peerDao.create(peer);
+            }
+            peerDao.update(peer);
+            return peer;
+        }, saved -> {
+            if (selected == null) {
+                peers.add(saved);
+            } else {
+                peers.set(peers.indexOf(selected), saved);
+            }
+            clearForm();
+            showFeedback("Peer saved.", false);
+        }, "Couldn’t save this peer.");
+    }
+
+    private void removePeer() {
+        Peer selected = selectedPeer();
+        if (!ViewParts.confirm(table, "Remove " + selected.name() + "?", "You can add this peer again later.", "Remove peer")) {
+            return;
+        }
+        runChange(() -> {
+            peerDao.deleteById(selected.id());
+            return selected;
+        }, removed -> {
+            peers.remove(removed);
+            clearForm();
+            showFeedback("Peer removed.", false);
+        }, "Couldn’t remove this peer.");
     }
 
     public void refreshPeers() {
-        Task<List<Peer>> task = new Task<>() {
+        if (busy) {
+            return;
+        }
+        runChange(peerDao::findAll, loaded -> {
+            if (!peers.equals(loaded)) {
+                peers.setAll(loaded);
+            }
+        }, "Couldn’t load saved peers.");
+    }
+
+    private <T> void runChange(Callable<T> action, Consumer<T> success, String failure) {
+        busy = true;
+        updateActions();
+        Task<T> task = new Task<>() {
             @Override
-            protected List<Peer> call() throws SQLException {
-                return peerDao.findAll();
+            protected T call() throws Exception {
+                return action.call();
             }
         };
-
-        task.setOnSucceeded(e -> {
-            peerList.setAll(task.getValue());
+        task.setOnSucceeded(event -> {
+            busy = false;
+            updateActions();
+            success.accept(task.getValue());
         });
-
-        task.setOnFailed(e -> {
-            Throwable ex = task.getException();
-            LOGGER.log(Level.SEVERE, "Failed to load peers", ex);
-            showAlert(Alert.AlertType.ERROR, "Database Error", "Could not load peers: " + ex.getMessage());
+        task.setOnFailed(event -> {
+            busy = false;
+            updateActions();
+            Throwable error = task.getException();
+            AppLogger.create().log(Level.WARNING, failure, error);
+            showFeedback(failure, true);
         });
-
-        new Thread(task, "PeersTab-RefreshPeersTask").start();
+        new Thread(task, "PeersTab-DatabaseTask").start();
     }
 
     private void clearForm() {
-        selectedPeer = null;
-        nameField.clear();
-        ipField.clear();
-        portField.clear();
-        peerTable.getSelectionModel().clearSelection();
+        table.getSelectionModel().clearSelection();
+        name.clear();
+        address.clear();
+        port.clear();
+        showFeedback("", false);
     }
 
-    private void showAlert(Alert.AlertType type, String title, String message) {
-        Alert alert = new Alert(type);
-        alert.setTitle(title);
-        alert.setHeaderText(null);
-        alert.setContentText(message);
-        alert.showAndWait();
+    private void showFeedback(String text, boolean error) {
+        feedback.getStyleClass().remove("error-text");
+        if (error) {
+            feedback.getStyleClass().add("error-text");
+        }
+        feedback.setText(text);
     }
 }

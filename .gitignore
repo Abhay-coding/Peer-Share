@@ -1,31 +1,35 @@
-# Compiled Java output
-out/
+# Build output and local test runs
+/out/
+/outputs/
+/work/
 *.class
+*.log
 
-# SQLite Database
+# Local SQLite data
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
-peershare.db
 
-# User data & transfer directories
-downloads/*
-!downloads/.gitkeep
-shared_files/*
-!shared_files/.gitkeep
+# Shared files and downloads
+/downloads/*
+!/downloads/.gitkeep
+/shared_files/*
+!/shared_files/.gitkeep
 *.part
 
-# Dependencies (JARs in lib/ - consider using Maven/Gradle instead)
-lib/
+# Keep the libraries shipped with PeerShare visible to Git
+/lib/*
+!/lib/javafx-base.jar
+!/lib/javafx-controls.jar
+!/lib/javafx-graphics.jar
+!/lib/sqlite-jdbc.jar
 
-# Build & test output directories
-outputs/
-work/
-
-# Internal tooling directories
-.claude-flow/
-.swarm/
+# Local instructions and tooling
+AGENTS.md
+/.claude-flow/
+/.swarm/
+/docs/superpowers/
 
 # IDE and Editor files
 .vscode/
@@ -37,10 +41,8 @@ work/
 Thumbs.db
 desktop.ini
 
-# Test artifacts
-Integer.MAX_VALUE
-
-# Markdown documentation handling (keep README.md and EXPLANATION.md)
-*.md
-!README.md
-!EXPLANATION.md
+# Stray files generated in the project root
+/0
+/Integer.MAX_VALUE
+/Protocol.MAX_FILE_BYTES)
+/Protocol.MAX_LIST_FILES)

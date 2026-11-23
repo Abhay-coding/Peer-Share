@@ -532,7 +532,7 @@ All tests pass cleanly via `.\scripts\test.ps1`.
 
 > “In Stage 5, I implemented TCP networking using Java Sockets. `PeerServer` listens for incoming connections on a `ServerSocket` in a background thread and spawns a new `ClientHandler` thread for every connection so peers can interact concurrently. I designed a custom text protocol where peers exchange commands like `LIST` and responses like `OK <count>`. On the client side, `FileTransferClient` connects with explicit connect and read timeouts so network issues do not freeze the application. I also verified the networking with automated integration tests using dynamic port binding.”
 
-## 12. Stage 6: File download, atomic cleanup, and history recording
+## 12. Stage 6: File download, safe publishing, and history recording
 
 ### What does this stage do?
 
@@ -540,22 +540,19 @@ Stage 6 completes the core file transfer engine:
 1. A peer requests a file from a remote peer using `DOWNLOAD <filename>`.
 2. The remote peer validates the request, sends the file size, and streams the raw bytes over the TCP socket.
 3. The client receives the stream and writes it into a temporary `.part` file in `downloads/`.
-4. Once the exact number of bytes is received and verified, the file is **atomically moved** to its final filename.
-5. If an interruption, timeout, or security violation occurs, the incomplete `.part` file is immediately deleted.
-6. Regardless of success or failure, a record is permanently logged in the SQLite `download_history` table.
+4. After the byte count and checksum are verified, PeerShare publishes the file at its final name if that name is available.
+5. PeerShare attempts to remove the temporary `.part` file after the transfer.
+6. PeerShare saves the result in the SQLite `download_history` table. If history fails after publishing, the completed file stays in the downloads folder.
 
 ### Why use temporary `.part` files?
 
 In network applications, transfers can fail at any time due to Wi-Fi drops, sudden shutdowns, or timeouts.
 - **Without `.part` files**: a user could end up with half of an image or a broken PDF inside their `downloads` folder without knowing it was incomplete.
-- **With `.part` files**: the file is saved as `lecture_notes.pdf.part` during transit. If the transfer fails midway, the `.part` file is deleted. The real `lecture_notes.pdf` only appears in `downloads/` when it is 100% complete and verified.
+- **With `.part` files**: each transfer writes to a unique temporary file. The final filename only appears in `downloads/` after verification.
 
-### What is an Atomic Move?
+### How does publishing protect existing files?
 
-In Java NIO, `Files.move(..., StandardCopyOption.ATOMIC_MOVE)` asks the operating system to perform the file rename as an atomic (indivisible) action.
-- There is no point in time where the destination file is partially written.
-- Other applications or user file explorers will never observe half-written files.
-- If the filesystem does not support atomic moves (for example across different disk partitions), we gracefully fall back to `StandardCopyOption.REPLACE_EXISTING`.
+PeerShare uses `Files.createLink` to give the verified temporary file its final name. The operating system creates that name in one step and rejects it if another file already has it. PeerShare then removes the temporary name. The downloads folder needs to be on a filesystem that supports hard links.
 
 ### `src/main/java/com/peershare/service/TransferService.java`
 
@@ -563,9 +560,9 @@ In Java NIO, `Files.move(..., StandardCopyOption.ATOMIC_MOVE)` asks the operatin
 
 | Method / Responsibility | Description |
 |---|---|
-| `download(Peer peer, String fileName)` | Full workflow: validates input, triggers download, moves file, and records history. |
-| Security Check | Rejects path traversal attempts (e.g. `../secret.txt`) with an `IllegalArgumentException` before opening any network or file connection. |
-| Cleanup on Failure | `catch` block guarantees `Files.deleteIfExists(tempFile)` is called if an exception occurs. |
+| `download(Peer peer, String fileName)` | Validates the request, verifies the download, publishes the file, and records the result. |
+| Security Check | Rejects unsafe filenames such as `../secret.txt` before opening a network connection. |
+| Temporary File Cleanup | A `finally` block attempts to delete the temporary file after either outcome. |
 | History Recording | Saves a `SUCCESS` row on completion, or a `FAILED` row if an error is caught. |
 
 ### How streaming works in `FileTransferClient.download`
@@ -610,7 +607,7 @@ All 6 project test suites pass cleanly via `.\scripts\test.ps1`.
 
 ### A short viva explanation for Stage 6
 
-> “In Stage 6, I implemented the complete binary file download pipeline. `TransferService` coordinates between the UI and `FileTransferClient`. When downloading, incoming bytes are written to a temporary `.part` file and verified against the expected byte count. Once verified, the file is moved atomically to `downloads/` using Java NIO's `Files.move`. If any error or network interruption occurs, the temporary file is immediately deleted to avoid leaving corrupted files on disk. Finally, every download outcome is permanently logged as `SUCCESS` or `FAILED` in the SQLite database.”
+> “In Stage 6, I built the file download workflow. `TransferService` asks `FileTransferClient` to write and verify the download in a temporary file. It then gives the verified file its final name in one filesystem operation so an existing file is preserved. It cleans up the temporary file and records the result in SQLite.”
 
 ## 13. Stage 7: JavaFX desktop user interface and background tasks
 
@@ -724,7 +721,7 @@ You can easily demonstrate peer-to-peer file sharing on your laptop:
    * **A:** `InputValidator.isSafeFileName()` rejects any filename containing `/`, `\`, or `..`. Furthermore, both `ClientHandler` and `TransferService` resolve and normalize paths, verifying that the target path strictly starts with the authorized base directory.
 
 5. **Q: Why do you download to a `.part` file first?**
-   * **A:** Network transfers can be interrupted by timeouts or Wi-Fi drops. Downloading to a `.part` file ensures incomplete or corrupted files are never presented to the user. Once the exact byte count is verified, `Files.move(..., ATOMIC_MOVE)` renames it in a single atomic step.
+   * **A:** Network transfers can be interrupted by timeouts or Wi-Fi drops. PeerShare writes to a temporary `.part` file and checks the size and checksum before creating the final filename. If that name already exists, the existing file is preserved.
 
 6. **Q: What is the DAO (Data Access Object) pattern?**
    * **A:** DAO separates the business and UI logic from database operations. Classes like `PeerDao` contain all SQL queries (`SELECT`, `INSERT`, `UPDATE`, `DELETE`), allowing the rest of the application to deal only with Java objects.

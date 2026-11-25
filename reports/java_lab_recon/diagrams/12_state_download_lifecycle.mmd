@@ -1,0 +1,12 @@
+stateDiagram-v2
+    [*] --> Validating : download() called
+    Validating --> Failed : Invalid name or destination exists
+    Validating --> Downloading : .part temp file created
+    Downloading --> Cancelling : User clicks Cancel
+    Cancelling --> Failed : Socket closed -> CancellationException
+    Downloading --> Failed : Network error / SHA-256 mismatch
+    Downloading --> Publishing : Bytes & SHA-256 verified
+    Publishing --> Failed : FileAlreadyExistsException
+    Publishing --> Saved : Files.createLink succeeded
+    Saved --> [*] : SUCCESS logged & .part deleted
+    Failed --> [*] : FAILED logged & .part deleted

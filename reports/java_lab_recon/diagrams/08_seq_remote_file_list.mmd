@@ -1,0 +1,17 @@
+sequenceDiagram
+    actor User
+    participant DT as DownloadTab
+    participant FTC as FileTransferClient
+    participant PS as PeerServer
+    participant CH as ClientHandler
+    participant FS as FileScanner
+    User->>DT: Select Peer / Click Refresh files
+    DT->>FTC: Task -> listRemoteFiles(peer)
+    FTC->>PS: TCP Connect (3s timeout)
+    PS->>CH: Spawn ClientHandler thread
+    FTC->>CH: "LIST\n"
+    CH->>FS: scan()
+    FS-->>CH: List<SharedFile> (filtered <= 100 MiB)
+    CH-->>FTC: "OK <count>\n" + "<name>|<size>|<date>\n"
+    FTC-->>DT: List<SharedFile>
+    DT-->>User: Populate TableView

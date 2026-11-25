@@ -1,0 +1,15 @@
+flowchart TB
+    User(["Local User"]) --> P1["1.0 Manage Config & Peers"]
+    P1 <--> DB1[("peer table")]
+    User --> P2["2.0 Scan Shared Folder"]
+    FS1[("shared_files/")] --> P2
+    P2 --> DB2[("shared_file table")]
+    User --> P3["3.0 Browse & Download"]
+    DB1 --> P3
+    P3 <--> RP(["Remote Peer"])
+    P3 --> FS2[("downloads/")]
+    P3 --> DB3[("download_history table")]
+    RP --> P4["4.0 Serve Shared Files"]
+    FS1 --> P4
+    User --> P5["5.0 View/Remove History"]
+    P5 <--> DB3

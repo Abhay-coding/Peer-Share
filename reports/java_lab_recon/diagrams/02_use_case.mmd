@@ -1,0 +1,25 @@
+flowchart LR
+    U(["Local User"])
+    RP(["Remote Peer Instance"])
+    subgraph PeerShare["PeerShare Desktop Application"]
+        UC1["View & Search Shared Files"]
+        UC2["Refresh Shared Folder"]
+        UC3["Open Shared / Downloads Folder"]
+        UC4["Add / Edit / Remove Peer"]
+        UC5["Browse Remote Peer Files (LIST)"]
+        UC6["Download Remote File (DOWNLOAD)"]
+        UC7["Cancel Active Download"]
+        UC8["View & Remove Download History"]
+        UC9["Serve Local Files (Background PeerServer)"]
+    end
+    U --> UC1
+    U --> UC2
+    U --> UC3
+    U --> UC4
+    U --> UC5
+    U --> UC6
+    U --> UC7
+    U --> UC8
+    UC5 --> RP
+    UC6 --> RP
+    RP --> UC9

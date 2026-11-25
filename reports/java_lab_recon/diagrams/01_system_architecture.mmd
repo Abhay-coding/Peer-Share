@@ -1,0 +1,51 @@
+flowchart TB
+    subgraph UI["Presentation Layer (com.peershare.ui)"]
+        MV[MainView]
+        SFT[SharedFilesTab]
+        PT[PeersTab]
+        DT[DownloadTab]
+        HT[HistoryTab]
+        VP[ViewParts]
+        MV --> SFT
+        MV --> PT
+        MV --> DT
+        MV --> HT
+    end
+    subgraph SVC["Service Layer (com.peershare.service)"]
+        FS[FileScanner]
+        TS[TransferService]
+    end
+    subgraph NET["Networking Layer (com.peershare.network)"]
+        PS[PeerServer]
+        CH[ClientHandler]
+        FTC[FileTransferClient]
+        PR[Protocol]
+        SD[SocketDeadline]
+        PS --> CH
+        CH --> PR
+        CH --> SD
+        FTC --> PR
+        FTC --> SD
+    end
+    subgraph DATA["Data & Persistence (com.peershare.dao / db / model)"]
+        PD[PeerDao]
+        SFD[SharedFileDao]
+        DHD[DownloadHistoryDao]
+        DBM[DatabaseManager]
+        SQLITE[(peershare.db)]
+        PD --> DBM
+        SFD --> DBM
+        DHD --> DBM
+        DBM --> SQLITE
+    end
+    SFT --> FS
+    SFT --> SFD
+    PT --> PD
+    DT --> PD
+    DT --> FTC
+    DT --> TS
+    HT --> DHD
+    TS --> FTC
+    TS --> DHD
+    PS --> FS
+    CH --> FS

@@ -1,4 +1,16 @@
 classDiagram
+    class Application {
+        <<JavaFX>>
+    }
+    class Runnable {
+        <<interface>>
+    }
+    class AutoCloseable {
+        <<interface>>
+    }
+    class IOException {
+        <<JDK>>
+    }
     class MainApp {
         -AppConfig config
         -DatabaseManager databaseManager
@@ -70,6 +82,9 @@ classDiagram
         +listRemoteFiles(Peer) List~SharedFile~
         +download(Peer, String, Path, long, BooleanSupplier) Path
     }
+    class ListRejectedException {
+        +fileLimitExceeded() boolean
+    }
     class SocketDeadline {
         +failure(IOException) IOException
         +close()
@@ -81,6 +96,14 @@ classDiagram
     class TransferService {
         +download(Peer, String, long, BooleanSupplier) Path
     }
+    class HistoryWriteException {
+        +savedFile() Path
+    }
+    MainApp --|> Application
+    ClientHandler ..|> Runnable
+    SocketDeadline ..|> AutoCloseable
+    ListRejectedException --|> IOException
+    HistoryWriteException --|> IOException
     MainApp --> AppConfig
     MainApp --> DatabaseManager
     MainApp --> PeerServer
@@ -93,5 +116,7 @@ classDiagram
     ClientHandler --> FileScanner
     ClientHandler ..> SocketDeadline
     FileTransferClient ..> SocketDeadline
+    FileTransferClient +-- ListRejectedException
     TransferService --> FileTransferClient
     TransferService --> DownloadHistoryDao
+    TransferService +-- HistoryWriteException

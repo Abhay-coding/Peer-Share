@@ -218,8 +218,12 @@ public final class NetworkTransferTest {
         try (Socket idleClient = new Socket("127.0.0.1", server.port())) {
             idleClient.setSoTimeout(2000);
             server.stop();
-            TestSupport.assertEquals(-1, idleClient.getInputStream().read(),
-                    "Stopping the server should close an accepted client.");
+            try {
+                TestSupport.assertEquals(-1, idleClient.getInputStream().read(),
+                        "Stopping the server should close an accepted client.");
+            } catch (java.net.SocketException expectedOnReset) {
+                // Windows may send TCP RST instead of FIN when the server closes an idle socket.
+            }
             server.start();
             Peer peer = new Peer(1, "Restarted", "127.0.0.1", server.port());
             TestSupport.assertEquals(0, new FileTransferClient().listRemoteFiles(peer).size(),

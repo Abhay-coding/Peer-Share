@@ -1,0 +1,15 @@
+flowchart TD
+    Start([User clicks Download file]) --> V1{Valid peer & safe filename?}
+    V1 -- No --> Fail1[Log FAILED history & throw IOException]
+    V1 -- Yes --> V2{Destination already exists?}
+    V2 -- Yes --> Fail1
+    V2 -- No --> Temp[Create unique peershare-*.part temp file]
+    Temp --> Net[Send DOWNLOAD & stream 8KB chunks + SHA-256]
+    Net --> V3{Complete, EOF & SHA-256 match?}
+    V3 -- No / Cancelled --> Clean[Log FAILED history & delete .part]
+    V3 -- Yes --> Link[Files.createLink destination, tempFile]
+    Link --> V4{Link succeeded?}
+    V4 -- No --> Clean
+    V4 -- Yes --> Hist[Insert SUCCESS in download_history]
+    Hist --> DelPart[finally: delete .part temp file]
+    DelPart --> Done([Show Saved confirmation])

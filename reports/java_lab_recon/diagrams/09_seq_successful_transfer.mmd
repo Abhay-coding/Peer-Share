@@ -1,0 +1,21 @@
+sequenceDiagram
+    actor User
+    participant DT as DownloadTab
+    participant TS as TransferService
+    participant FTC as FileTransferClient
+    participant CH as ClientHandler
+    participant DAO as DownloadHistoryDao
+    User->>DT: Click Download file
+    DT->>TS: Task -> download(peer, fileName, size, cancelled)
+    TS->>TS: Validate name & create peershare-*.part
+    TS->>FTC: download(peer, fileName, tempFile, size, cancelled)
+    FTC->>CH: "DOWNLOAD <fileName>\n"
+    CH->>CH: Validate & compute SHA-256
+    CH-->>FTC: "OK <size> <sha256>\n" + raw bytes
+    FTC->>FTC: Write 8KB chunks + verify SHA-256 & EOF
+    FTC-->>TS: tempFile verified
+    TS->>TS: Files.createLink(destination, tempFile)
+    TS->>DAO: create(DownloadHistory "SUCCESS")
+    TS->>TS: finally: deleteIfExists(tempFile)
+    TS-->>DT: destination Path
+    DT-->>User: "Saved <file> to downloads."

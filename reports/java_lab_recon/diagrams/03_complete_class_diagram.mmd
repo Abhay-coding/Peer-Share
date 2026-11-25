@@ -1,0 +1,122 @@
+classDiagram
+    class Application {
+        <<JavaFX>>
+    }
+    class Runnable {
+        <<interface>>
+    }
+    class AutoCloseable {
+        <<interface>>
+    }
+    class IOException {
+        <<JDK>>
+    }
+    class MainApp {
+        -AppConfig config
+        -DatabaseManager databaseManager
+        -PeerServer peerServer
+        +init()
+        +start(Stage)
+        +stop()
+    }
+    class AppConfig {
+        -int serverPort
+        -String bindAddress
+        -Path sharedDirectory
+        -Path downloadDirectory
+        -Path databasePath
+        +load(Path)$ AppConfig
+    }
+    class DatabaseManager {
+        -Path databasePath
+        +getConnection() Connection
+        +initialize()
+    }
+    class PeerDao {
+        +create(Peer) Peer
+        +findAll() List~Peer~
+        +update(Peer)
+        +deleteById(long)
+    }
+    class SharedFileDao {
+        +findAll() List~SharedFile~
+        +replaceAll(List~SharedFile~)
+    }
+    class DownloadHistoryDao {
+        +create(DownloadHistory) DownloadHistory
+        +findAll() List~DownloadHistory~
+        +deleteById(long)
+    }
+    class Peer {
+        <<record>>
+        +long id
+        +String name
+        +String ipAddress
+        +int port
+    }
+    class SharedFile {
+        <<record>>
+        +long id
+        +String fileName
+        +long fileSize
+        +LocalDateTime lastModified
+    }
+    class DownloadHistory {
+        <<record>>
+        +long id
+        +String fileName
+        +String peerName
+        +LocalDateTime downloadedAt
+        +String status
+    }
+    class PeerServer {
+        +int MAX_CLIENTS = 10
+        +start()
+        +stop()
+        +port() int
+    }
+    class ClientHandler {
+        +run()
+    }
+    class FileTransferClient {
+        +listRemoteFiles(Peer) List~SharedFile~
+        +download(Peer, String, Path, long, BooleanSupplier) Path
+    }
+    class ListRejectedException {
+        +fileLimitExceeded() boolean
+    }
+    class SocketDeadline {
+        +failure(IOException) IOException
+        +close()
+    }
+    class FileScanner {
+        +scan() List~SharedFile~
+        +scanAndStore(SharedFileDao) List~SharedFile~
+    }
+    class TransferService {
+        +download(Peer, String, long, BooleanSupplier) Path
+    }
+    class HistoryWriteException {
+        +savedFile() Path
+    }
+    MainApp --|> Application
+    ClientHandler ..|> Runnable
+    SocketDeadline ..|> AutoCloseable
+    ListRejectedException --|> IOException
+    HistoryWriteException --|> IOException
+    MainApp --> AppConfig
+    MainApp --> DatabaseManager
+    MainApp --> PeerServer
+    MainApp --> TransferService
+    PeerDao --> DatabaseManager
+    SharedFileDao --> DatabaseManager
+    DownloadHistoryDao --> DatabaseManager
+    PeerServer --> FileScanner
+    PeerServer ..> ClientHandler : spawns
+    ClientHandler --> FileScanner
+    ClientHandler ..> SocketDeadline
+    FileTransferClient ..> SocketDeadline
+    FileTransferClient +-- ListRejectedException
+    TransferService --> FileTransferClient
+    TransferService --> DownloadHistoryDao
+    TransferService +-- HistoryWriteException

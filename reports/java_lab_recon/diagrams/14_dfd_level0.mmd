@@ -1,0 +1,7 @@
+flowchart LR
+    User(["Local User"]) -- "Peer details, search, download/cancel" --> PS["0.0 PeerShare Application"]
+    PS -- "Tables, status feedback, opened folders" --> User
+    RP(["Remote Peer"]) -- "LIST response, file bytes + SHA-256" --> PS
+    PS -- "LIST, DOWNLOAD <file>" --> RP
+    PS <-- "Read/write shared_files & downloads" --> FS[("Local Filesystem")]
+    PS <-- "SQLite CRUD" --> DB[("peershare.db")]

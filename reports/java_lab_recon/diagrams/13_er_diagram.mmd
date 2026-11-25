@@ -1,0 +1,20 @@
+erDiagram
+    PEER {
+        INTEGER id PK
+        TEXT name
+        TEXT ip_address
+        INTEGER port
+    }
+    SHARED_FILE {
+        INTEGER id PK
+        TEXT file_name
+        INTEGER file_size
+        TEXT last_modified
+    }
+    DOWNLOAD_HISTORY {
+        INTEGER id PK
+        TEXT file_name
+        TEXT peer_name
+        TEXT downloaded_at
+        TEXT status
+    }

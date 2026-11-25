@@ -1,0 +1,18 @@
+sequenceDiagram
+    actor User
+    participant Tab as PeersTab
+    participant Val as InputValidator
+    participant Dao as PeerDao
+    participant DB as SQLite
+    User->>Tab: Fill Name, IP, Port & click Add peer
+    Tab->>Val: validatePeer(name, address, port)
+    alt Invalid Input
+        Val-->>Tab: IllegalArgumentException
+        Tab-->>User: Show error feedback & focus field
+    else Valid Input
+        Tab->>Dao: Task -> peerDao.create(peer)
+        Dao->>DB: INSERT INTO peer ... (RETURN_GENERATED_KEYS)
+        DB-->>Dao: generated id
+        Dao-->>Tab: Peer(id, name, address, port)
+        Tab-->>User: Update TableView & show "Peer saved."
+    end

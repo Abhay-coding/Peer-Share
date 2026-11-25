@@ -1,0 +1,59 @@
+{
+  "repository": {
+    "url": "https://github.com/Zylus08/Peer-Share.git",
+    "branch": "main",
+    "head_sha": "230bb5fb750812f7d1f19a3fc5586932f99e58ed",
+    "head_date": "2026-11-23 11:37:16 +0530",
+    "total_commits": 8
+  },
+  "counting_methodology": {
+    "source_lines": "Physical non-blank, non-comment lines in *.java files (excluding // and /* ... */ comments and whitespace-only lines).",
+    "classes_and_methods": "Measured via Java reflection on compiled bytecode in out/main and out/test, excluding synthetic and bridge methods."
+  },
+  "production": {
+    "java_files": 25,
+    "packages": 9,
+    "top_level_classes": 22,
+    "top_level_records": 3,
+    "nested_classes": 3,
+    "anonymous_classes": 9,
+    "interfaces": 1,
+    "enums": 0,
+    "total_compiled_class_files": 37,
+    "declared_methods": 135,
+    "constructors": 44,
+    "total_lines": 2558,
+    "source_lines_of_code": 2131,
+    "blank_lines": 290,
+    "comment_lines": 137,
+    "css_files": 1,
+    "css_lines": 109
+  },
+  "tests": {
+    "java_files": 9,
+    "packages": 1,
+    "top_level_classes": 9,
+    "records": 0,
+    "interfaces": 0,
+    "enums": 0,
+    "declared_methods": 52,
+    "constructors": 9,
+    "total_lines": 1028,
+    "source_lines_of_code": 877,
+    "blank_lines": 140,
+    "comment_lines": 11,
+    "individual_test_methods_audited": 37,
+    "audit_passed": 36,
+    "audit_failed": 1
+  },
+  "other": {
+    "external_jar_dependencies": 4,
+    "executable_scripts": 6,
+    "ui_screens_tabs": 4,
+    "database_tables": 3,
+    "protocol_commands": 2,
+    "protocol_response_statuses": 2,
+    "readme_lines": 60,
+    "explanation_lines": 739
+  }
+}

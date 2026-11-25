@@ -1,0 +1,16 @@
+sequenceDiagram
+    actor User
+    participant DT as DownloadTab
+    participant SD as SocketDeadline
+    participant FTC as FileTransferClient
+    participant TS as TransferService
+    participant DAO as DownloadHistoryDao
+    User->>DT: Click Cancel download
+    DT->>DT: activeDownload.set(true)
+    SD->>FTC: Poll cancelled==true -> socket.close()
+    FTC->>SD: IOException -> failure(ex) throws CancellationException
+    SD-->>TS: CancellationException
+    TS->>DAO: create(DownloadHistory "FAILED")
+    TS->>TS: finally: Files.deleteIfExists(tempFile)
+    TS-->>DT: CancellationException
+    DT-->>User: "Download cancelled."

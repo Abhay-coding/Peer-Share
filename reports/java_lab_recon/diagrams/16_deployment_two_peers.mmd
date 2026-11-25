@@ -1,0 +1,25 @@
+flowchart LR
+    subgraph NodeA["Peer A Host (192.168.1.10 or 127.0.0.1)"]
+        A_UI["MainView (JavaFX 21)"]
+        A_CLI["FileTransferClient"]
+        A_SRV["PeerServer :5000"]
+        A_DB[("peershare.db")]
+        A_FS[("shared_files/ & downloads/")]
+        A_UI --> A_CLI
+        A_UI --> A_DB
+        A_CLI --> A_FS
+        A_SRV --> A_FS
+    end
+    subgraph NodeB["Peer B Host (192.168.1.11 or 127.0.0.1)"]
+        B_UI["MainView (JavaFX 21)"]
+        B_CLI["FileTransferClient"]
+        B_SRV["PeerServer :5001"]
+        B_DB[("peershare.db")]
+        B_FS[("shared_files/ & downloads/")]
+        B_UI --> B_CLI
+        B_UI --> B_DB
+        B_CLI --> B_FS
+        B_SRV --> B_FS
+    end
+    A_CLI -- "TCP :5001 (LIST / DOWNLOAD)" --> B_SRV
+    B_CLI -- "TCP :5000 (LIST / DOWNLOAD)" --> A_SRV

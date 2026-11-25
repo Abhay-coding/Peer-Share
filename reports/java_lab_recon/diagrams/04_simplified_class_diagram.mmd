@@ -1,0 +1,38 @@
+classDiagram
+    class MainApp {
+        +init()
+        +start(Stage)
+        +stop()
+    }
+    class MainView {
+        +SharedFilesTab
+        +PeersTab
+        +DownloadTab
+        +HistoryTab
+    }
+    class FileScanner {
+        +scan()
+        +scanAndStore(SharedFileDao)
+    }
+    class TransferService {
+        +download(Peer, String)
+    }
+    class PeerServer {
+        +start()
+        +stop()
+    }
+    class FileTransferClient {
+        +listRemoteFiles(Peer)
+        +download(...)
+    }
+    class DatabaseManager {
+        +getConnection()
+        +initialize()
+    }
+    MainApp --> MainView
+    MainApp --> PeerServer
+    MainApp --> DatabaseManager
+    MainView --> FileScanner
+    MainView --> TransferService
+    TransferService --> FileTransferClient
+    PeerServer --> FileScanner

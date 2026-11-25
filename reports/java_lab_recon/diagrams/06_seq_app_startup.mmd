@@ -1,0 +1,16 @@
+sequenceDiagram
+    participant JVM as Launcher
+    participant App as MainApp
+    participant Cfg as AppConfig
+    participant DB as DatabaseManager
+    participant Srv as PeerServer
+    participant UI as MainView
+    JVM->>App: main(args) -> launch()
+    App->>Cfg: load(Path.of("."))
+    Cfg-->>App: config
+    App->>DB: initialize()
+    DB-->>App: tables ready
+    App->>Srv: start()
+    Srv-->>App: listening on port
+    App->>UI: new MainView(...)
+    App->>UI: primaryStage.show()

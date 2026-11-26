@@ -6,6 +6,8 @@ PeerShare sends files between two open copies of the app. You can try it with tw
 
 ## Open PeerShare
 
+See the [new-laptop setup checklist](requirement.txt) for everything you need to get started.
+
 On **Windows**, install a Java Development Kit (JDK 17 or newer). Open PowerShell in the project folder and run:
 
 ```powershell

@@ -1,0 +1,47 @@
+PeerShare setup checklist
+=========================
+
+Windows
+-------
+1. Download or copy the complete PeerShare project. If it is a ZIP file,
+   extract it to a folder you can write to. Keep lib/ and scripts/ with it.
+2. Install a Java Development Kit (JDK 17 or newer). Open PowerShell and
+   run these commands to check that Java and its compiler are available:
+
+       java -version
+       javac -version
+
+   If PeerShare cannot find your JDK, set JAVA_HOME to the JDK installation
+   folder. Use the folder that contains bin, such as the one shown here:
+
+       $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
+
+   Replace the example path with your actual installation path. This
+   PowerShell setting applies to the current terminal.
+3. Open PowerShell in the extracted PeerShare folder and start the app:
+
+       powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run.ps1
+
+The Windows JavaFX and SQLite JDBC libraries are included in lib/.
+The app builds from source at launch and creates its local database.
+
+macOS and Linux
+---------------
+Install JDK 17 or newer. Replace the three JavaFX JARs in lib/ with builds
+for your operating system and processor. Keep sqlite-jdbc.jar, then run
+this from the PeerShare project folder:
+
+    sh scripts/run.sh
+
+Two-laptop sharing
+------------------
+Use the same version of PeerShare on both laptops and follow the pairing
+steps in docs/lan-setup.md. Both laptops need a network that lets devices
+reach each other. Give the receiver the sender's current local IP address
+and the port shown in PeerShare. The default port is 5001.
+
+Optional Windows check
+----------------------
+From the project folder, run the automated test suite:
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1

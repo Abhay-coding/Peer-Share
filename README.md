@@ -20,7 +20,7 @@ The project includes the Windows libraries it needs in `lib/`. If the script can
 2. Copy the files you want to share directly into that folder. Click **Refresh** to check the list.
 3. Leave PeerShare open on that computer. Give the person receiving the files its address and the port number shown at the bottom of the sidebar.
 
-By default, PeerShare accepts connections from the same computer. To share across two computers, change `server.bindAddress` to `0.0.0.0` in the sender’s `config.properties` and restart the app. The receiver enters the sender’s **local IP address**, such as `192.168.1.10`. If a firewall asks, allow PeerShare on your private network. Use a network and computers you trust. Anyone who can reach PeerShare can request the files you put in its shared folder, and transfers aren’t encrypted.
+By default, PeerShare accepts connections from the same computer. For two computers, use the same updated version of PeerShare and [pair the laptops before sharing](docs/lan-setup.md). PeerShare encrypts LAN transfers and only accepts connections from paired computers. Use a trusted network that lets devices reach each other.
 
 ## Download a file
 
@@ -38,9 +38,9 @@ By default, PeerShare accepts connections from the same computer. To share acros
 
 ## Try it on one computer
 
-1. Copy the project into a second folder. Leave `server.port=5000` in the first copy and change it to `server.port=5001` in the second copy’s `config.properties`.
+1. Copy the project into a second folder. Set `server.port=5001` in the first copy and `server.port=5002` in the second copy. Keep `server.bindAddress=127.0.0.1` in both and launch them without setting a LAN password.
 2. Start both copies. Put a small file in the second copy’s shared folder.
-3. In the first copy, add a peer with the address `127.0.0.1` and port `5001`. Browse its files and download the sample.
+3. In the first copy, add a peer with the address `127.0.0.1` and port `5002`. Browse its files and download the sample.
 
 ## If something goes wrong
 
@@ -48,11 +48,10 @@ By default, PeerShare accepts connections from the same computer. To share acros
 | --- | --- |
 | PeerShare can’t reach the other copy | Make sure it’s open and check its address and port. Across two computers, check that both are on the same network and the sender allows local-network connections. |
 | The other computer shows no files | Put files directly in its shared folder and refresh the list on the **Download** screen. Files over 100 MB are skipped. |
-| A peer is sharing too many files | Keep at most 500 shareable files in that peer’s shared folder, then click **Refresh files**. |
+| The list says some files are hidden | The app displays up to 500 files within the 100 MiB limit. Move files you don’t need out of that peer’s shared folder and click **Refresh files**. |
 | A file saved but its history entry couldn’t be recorded | Use **Open downloads** to find the file. Check that PeerShare can write to its project folder. |
 | A download says the file already exists | Move or rename the existing file in your downloads folder before trying again. PeerShare keeps the existing copy. |
-| The downloads folder doesn’t support hard links | Run PeerShare from a local drive that supports hard links, such as an NTFS drive on Windows. |
-| The app says the port is in use | Close the other app using that port or choose a different `server.port` in `config.properties`. |
+| The app says the port is in use | Downloads still work. If you want to share from this copy, choose a free `server.port` in `config.properties` and restart it. |
 | PeerShare rejects the folder settings | In `config.properties`, choose two separate subfolders. Keep downloads outside the shared folder and leave the project folder itself unshared. |
 
 ## Run the checks

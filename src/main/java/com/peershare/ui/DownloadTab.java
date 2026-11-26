@@ -23,6 +23,7 @@ import java.net.NoRouteToHostException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.nio.file.Path;
+import javax.net.ssl.SSLException;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Objects;
@@ -179,10 +180,15 @@ public final class DownloadTab extends Tab {
     private void listFiles(Peer peer) {
         clearFiles();
         runTask("Looking for files on " + peer.name() + "…", error -> fileListFailure(peer, error),
-                () -> client.listRemoteFiles(peer), listed -> {
+                () -> client.browseRemoteFiles(peer), listed -> {
                     listedPeer = peer;
-                    files.setAll(listed);
-                    showFeedback(files.size() == 1 ? "1 file available" : files.size() + " files available", false);
+                    files.setAll(listed.files());
+                    String count = files.size() == 1 ? "1 file available" : files.size() + " files available";
+                    if (listed.omitted() > 0) {
+                        count += ". Hidden by the " + Protocol.MAX_LIST_FILES + "-file list or "
+                                + (Protocol.MAX_FILE_BYTES / (1024 * 1024)) + " MiB size limit: " + listed.omitted() + ".";
+                    }
+                    showFeedback(count, false);
                 }, false);
     }
 
@@ -246,6 +252,12 @@ public final class DownloadTab extends Tab {
 
     private static String fileListFailure(Peer peer, Throwable error) {
         String name = peer.name();
+        if (error instanceof FileTransferClient.LanSetupRequiredException) {
+            return error.getMessage();
+        }
+        if (error instanceof SSLException) {
+            return "Couldn’t verify the connection to " + name + ". Check that both laptops are paired.";
+        }
         if (error instanceof FileTransferClient.ListRejectedException reply) {
             if (reply.fileLimitExceeded()) {
                 return name + " is sharing too many files. Keep at most " + Protocol.MAX_LIST_FILES

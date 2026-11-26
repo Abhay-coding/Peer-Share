@@ -3,11 +3,14 @@ package com.peershare.network;
 import com.peershare.model.Peer;
 import com.peershare.model.SharedFile;
 import com.peershare.util.InputValidator;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSocket;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,9 +34,14 @@ public final class FileTransferClient {
     private final int connectTimeoutMs;
     private final int readTimeoutMs;
     private final int requestTimeoutMs;
+    private final SSLContext tls;
 
     public FileTransferClient() {
         this(DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_READ_TIMEOUT_MS);
+    }
+
+    public FileTransferClient(SSLContext tls) {
+        this(DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_READ_TIMEOUT_MS, DEFAULT_REQUEST_TIMEOUT_MS, tls);
     }
 
     public FileTransferClient(int connectTimeoutMs, int readTimeoutMs) {
@@ -41,12 +49,17 @@ public final class FileTransferClient {
     }
 
     public FileTransferClient(int connectTimeoutMs, int readTimeoutMs, int requestTimeoutMs) {
+        this(connectTimeoutMs, readTimeoutMs, requestTimeoutMs, null);
+    }
+
+    private FileTransferClient(int connectTimeoutMs, int readTimeoutMs, int requestTimeoutMs, SSLContext tls) {
         if (requestTimeoutMs <= 0) {
             throw new IllegalArgumentException("Request timeout must be positive.");
         }
         this.requestTimeoutMs = requestTimeoutMs;
         this.connectTimeoutMs = connectTimeoutMs;
         this.readTimeoutMs = readTimeoutMs;
+        this.tls = tls;
     }
 
     /**
@@ -57,6 +70,16 @@ public final class FileTransferClient {
      * @throws IOException if the peer is unavailable or returns an error
      */
     public List<SharedFile> listRemoteFiles(Peer peer) throws IOException {
+        return browseRemoteFiles(peer).files();
+    }
+
+    public record RemoteFiles(List<SharedFile> files, int omitted) {
+        public RemoteFiles {
+            files = List.copyOf(files);
+        }
+    }
+
+    public RemoteFiles browseRemoteFiles(Peer peer) throws IOException {
         return request(peer, null, (in, out) -> {
 
             // Send LIST command
@@ -77,7 +100,10 @@ public final class FileTransferClient {
                 throw new IOException("Unexpected protocol response from peer: " + header);
             }
 
-            int count = parseCount(header);
+            String[] counts = header.substring(Protocol.STATUS_OK.length()).trim().split(" ", -1);
+            if (counts.length > 2) throw new IOException("Invalid file count from peer.");
+            int count = parseCount(counts[0], Protocol.MAX_LIST_FILES);
+            int omitted = counts.length == 2 ? parseCount(counts[1], Integer.MAX_VALUE) : 0;
             List<SharedFile> remoteFiles = new ArrayList<>();
 
             for (int i = 0; i < count; i++) {
@@ -102,7 +128,7 @@ public final class FileTransferClient {
                 remoteFiles.add(new SharedFile(0, fileName, fileSize, lastModified));
             }
 
-            return remoteFiles;
+            return new RemoteFiles(remoteFiles, omitted);
         });
     }
 
@@ -181,11 +207,18 @@ public final class FileTransferClient {
                 fileOut.flush();
             }
 
-            if (in.read() != -1) {
-                throw new IOException("Peer sent more bytes than announced.");
-            }
             if (!HexFormat.of().formatHex(digest.digest()).equals(metadata[1])) {
                 throw new IOException("Downloaded file checksum does not match.");
+            }
+            String completion = Protocol.readLine(in);
+            if (completion == null) {
+                throw new IOException("The peer didn’t confirm the completed file. Refresh or update PeerShare on the sender.");
+            }
+            if (completion.startsWith(Protocol.STATUS_ERROR + " ")) {
+                throw new IOException("The sender couldn’t confirm the file. Refresh the list and try again.");
+            }
+            if (!Protocol.STATUS_COMPLETE.equals(completion) || in.read() != -1) {
+                throw new IOException("Peer sent more bytes than announced or an invalid completion message.");
             }
 
             return temporaryTarget;
@@ -193,11 +226,19 @@ public final class FileTransferClient {
     }
 
     private <T> T request(Peer peer, BooleanSupplier cancelled, SocketRequest<T> action) throws IOException {
-        try (Socket socket = new Socket();
+        try (Socket socket = tls == null ? new Socket() : tls.getSocketFactory().createSocket();
              SocketDeadline deadline = new SocketDeadline(socket, requestTimeoutMs, cancelled)) {
             try {
-                socket.connect(new InetSocketAddress(peer.ipAddress(), peer.port()), connectTimeoutMs);
+                InetAddress address = InetAddress.getByName(peer.ipAddress());
+                if (tls == null && !address.isLoopbackAddress()) {
+                    throw new LanSetupRequiredException();
+                }
+                socket.connect(new InetSocketAddress(address, peer.port()), connectTimeoutMs);
                 socket.setSoTimeout(readTimeoutMs);
+                if (socket instanceof SSLSocket secure) {
+                    secure.setEnabledProtocols(new String[]{"TLSv1.3"});
+                    secure.startHandshake();
+                }
                 return action.run(socket.getInputStream(), socket.getOutputStream());
             } catch (IOException ex) {
                 throw deadline.failure(ex);
@@ -225,10 +266,18 @@ public final class FileTransferClient {
         }
     }
 
-    private static int parseCount(String header) throws IOException {
+    public static final class LanSetupRequiredException extends IOException {
+        private static final long serialVersionUID = 1L;
+
+        private LanSetupRequiredException() {
+            super("Set up trusted LAN certificates on this laptop before connecting.");
+        }
+    }
+
+    private static int parseCount(String value, int maximum) throws IOException {
         try {
-            int count = Integer.parseInt(header.substring(Protocol.STATUS_OK.length()).trim());
-            if (count < 0 || count > Protocol.MAX_LIST_FILES) throw new NumberFormatException();
+            int count = Integer.parseInt(value);
+            if (count < 0 || count > maximum) throw new NumberFormatException();
             return count;
         } catch (NumberFormatException ex) {
             throw new IOException("Invalid file count from peer.", ex);

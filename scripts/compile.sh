@@ -20,7 +20,7 @@ case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) CP_SEP=';' ;;
 esac
 
-mkdir -p out/main out/test
+mkdir -p out/main
 
 EXTRA_CP=""
 if [ -d "lib" ]; then
@@ -46,11 +46,14 @@ fi
 
 cp -R src/main/resources/. out/main/
 
-TEST_SOURCES=$(find src/test/java -name '*.java' 2>/dev/null || true)
-if [ -n "$TEST_SOURCES" ]; then
-  TEST_CP="out/main"
-  if [ -n "$EXTRA_CP" ]; then
-    TEST_CP="out/main$CP_SEP$EXTRA_CP"
+if [ "${peershare_app_only:-0}" = 0 ]; then
+  TEST_SOURCES=$(find src/test/java -name '*.java' 2>/dev/null || true)
+  if [ -n "$TEST_SOURCES" ]; then
+    mkdir -p out/test
+    TEST_CP="out/main"
+    if [ -n "$EXTRA_CP" ]; then
+      TEST_CP="out/main$CP_SEP$EXTRA_CP"
+    fi
+    "$JAVA_HOME/bin/javac" --release 17 -cp "$TEST_CP" -d out/test $TEST_SOURCES
   fi
-  "$JAVA_HOME/bin/javac" --release 17 -cp "$TEST_CP" -d out/test $TEST_SOURCES
 fi

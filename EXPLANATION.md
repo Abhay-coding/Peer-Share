@@ -552,7 +552,7 @@ In network applications, transfers can fail at any time due to Wi-Fi drops, sudd
 
 ### How does publishing protect existing files?
 
-PeerShare uses `Files.createLink` to give the verified temporary file its final name. The operating system creates that name in one step and rejects it if another file already has it. PeerShare then removes the temporary name. The downloads folder needs to be on a filesystem that supports hard links.
+PeerShare asks the sender for an explicit completion message before publishing the verified temporary file. It uses `Files.createLink` for one-step publishing where supported. If the filesystem cannot create a hard link, PeerShare creates a new destination exclusively and copies the verified bytes into it. Both paths preserve an existing file with the same name.
 
 ### `src/main/java/com/peershare/service/TransferService.java`
 

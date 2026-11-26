@@ -9,9 +9,11 @@ import com.peershare.util.AppLogger;
 import com.peershare.util.InputValidator;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.concurrent.CancellationException;
@@ -98,14 +100,7 @@ public final class TransferService {
                 throw new CancellationException("Download cancelled.");
             }
 
-            // Create the final name in one operation. Another download may have claimed it.
-            try {
-                Files.createLink(destination, tempFile);
-            } catch (FileAlreadyExistsException ex) {
-                throw new IOException("Download already exists: " + fileName, ex);
-            } catch (UnsupportedOperationException ex) {
-                throw new IOException("The downloads folder must support hard links.", ex);
-            }
+            publish(tempFile, destination);
             published = true;
 
             // Record successful download in SQLite
@@ -142,6 +137,38 @@ public final class TransferService {
                     LOGGER.log(Level.WARNING, "Failed to clean up temp file", cleanupEx);
                 }
             }
+        }
+    }
+
+    private static void publish(Path temporary, Path destination) throws IOException {
+        try {
+            // A hard link publishes the verified file in one operation when supported.
+            Files.createLink(destination, temporary);
+        } catch (FileAlreadyExistsException ex) {
+            throw new IOException("Download already exists: " + destination.getFileName(), ex);
+        } catch (IOException | UnsupportedOperationException linkError) {
+            try {
+                copyToNewFile(temporary, destination);
+            } catch (FileAlreadyExistsException ex) {
+                throw new IOException("Download already exists: " + destination.getFileName(), ex);
+            } catch (IOException copyError) {
+                copyError.addSuppressed(linkError);
+                throw copyError;
+            }
+        }
+    }
+
+    private static void copyToNewFile(Path temporary, Path destination) throws IOException {
+        OutputStream output = Files.newOutputStream(destination, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+        try (output) {
+            Files.copy(temporary, output);
+        } catch (IOException ex) {
+            try {
+                Files.deleteIfExists(destination);
+            } catch (IOException cleanupError) {
+                ex.addSuppressed(cleanupError);
+            }
+            throw ex;
         }
     }
 

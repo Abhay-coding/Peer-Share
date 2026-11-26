@@ -13,13 +13,18 @@ public final class AppConfig {
     private final Path sharedDirectory;
     private final Path downloadDirectory;
     private final Path databasePath;
+    private final boolean sharingEnabled;
+    private final Path projectRoot;
 
-    private AppConfig(int serverPort, String bindAddress, Path sharedDirectory, Path downloadDirectory, Path databasePath) {
+    private AppConfig(int serverPort, String bindAddress, Path sharedDirectory, Path downloadDirectory,
+                      Path projectRoot, boolean sharingEnabled) {
         this.serverPort = serverPort;
         this.bindAddress = bindAddress;
         this.sharedDirectory = sharedDirectory;
         this.downloadDirectory = downloadDirectory;
-        this.databasePath = databasePath;
+        this.databasePath = projectRoot.resolve("peershare.db");
+        this.projectRoot = projectRoot;
+        this.sharingEnabled = sharingEnabled;
     }
 
     public static AppConfig load(Path projectRoot) throws IOException {
@@ -47,7 +52,11 @@ public final class AppConfig {
         Files.createDirectories(sharedDirectory);
         Files.createDirectories(downloadDirectory);
 
-        return new AppConfig(port, bindAddress, sharedDirectory, downloadDirectory, root.resolve("peershare.db"));
+        String sharing = properties.getProperty("server.enabled", "true").trim();
+        if (!sharing.equalsIgnoreCase("true") && !sharing.equalsIgnoreCase("false")) {
+            throw new IllegalArgumentException("server.enabled must be true or false.");
+        }
+        return new AppConfig(port, bindAddress, sharedDirectory, downloadDirectory, root, Boolean.parseBoolean(sharing));
     }
 
     private static Path resolveInsideRoot(Path root, String configuredDirectory) throws IOException {
@@ -89,5 +98,13 @@ public final class AppConfig {
 
     public Path databasePath() {
         return databasePath;
+    }
+
+    public boolean sharingEnabled() {
+        return sharingEnabled;
+    }
+
+    public Path projectRoot() {
+        return projectRoot;
     }
 }

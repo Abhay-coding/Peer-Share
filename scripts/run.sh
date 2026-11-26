@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+peershare_app_only=1
 . "$(dirname "$0")/compile.sh"
 
 EXTRA_CP=""

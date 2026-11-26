@@ -1,7 +1,7 @@
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $projectRoot
 
-& "$PSScriptRoot\compile.ps1"
+& "$PSScriptRoot\compile.ps1" -AppOnly
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if (-not $env:JAVA_HOME) {

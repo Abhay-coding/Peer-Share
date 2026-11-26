@@ -30,6 +30,7 @@ AGENTS.md
 /.claude-flow/
 /.swarm/
 /docs/superpowers/
+/.peershare-tls/
 
 # IDE and Editor files
 .vscode/

@@ -9,11 +9,14 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Objects;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -62,14 +65,13 @@ public final class ClientHandler implements Runnable {
 
     private void handleList(OutputStream out) throws IOException {
         // Folder is scanned at request time so remote peers always see current files
-        List<SharedFile> files = fileScanner.scan().stream()
+        List<SharedFile> scanned = fileScanner.scan();
+        List<SharedFile> files = scanned.stream()
                 .filter(file -> file.fileSize() <= Protocol.MAX_FILE_BYTES)
+                .limit(Protocol.MAX_LIST_FILES)
                 .toList();
-        if (files.size() > Protocol.MAX_LIST_FILES) {
-            Protocol.writeLine(out, Protocol.STATUS_ERROR + " " + Protocol.ERROR_TOO_MANY_FILES);
-            return;
-        }
-        Protocol.writeLine(out, Protocol.STATUS_OK + " " + files.size());
+        int omitted = scanned.size() - files.size();
+        Protocol.writeLine(out, Protocol.STATUS_OK + " " + files.size() + (omitted == 0 ? "" : " " + omitted));
 
         for (SharedFile file : files) {
             Protocol.writeLine(out, file.fileName() + "|" + file.fileSize() + "|" + file.lastModified());
@@ -89,17 +91,21 @@ public final class ClientHandler implements Runnable {
             return;
         }
 
-        long fileSize = Files.size(target);
-        var lastModified = Files.getLastModifiedTime(target);
+        var initial = Files.readAttributes(target, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        if (!initial.isRegularFile()) {
+            Protocol.writeLine(out, Protocol.STATUS_ERROR + " File not found");
+            return;
+        }
+        long fileSize = initial.size();
         if (fileSize > Protocol.MAX_FILE_BYTES) {
             Protocol.writeLine(out, Protocol.STATUS_ERROR + " File is too large");
             return;
         }
-        String checksum = checksum(target);
+        String checksum = checksum(target, fileSize);
         Protocol.writeLine(out, Protocol.STATUS_OK + " " + fileSize + " " + checksum);
 
         // Send exactly the announced number of bytes; detect a shrinking source.
-        try (InputStream fileIn = Files.newInputStream(target)) {
+        try (InputStream fileIn = Files.newInputStream(target, LinkOption.NOFOLLOW_LINKS)) {
             byte[] buffer = new byte[8192];
             long sent = 0;
             while (sent < fileSize) {
@@ -109,19 +115,28 @@ public final class ClientHandler implements Runnable {
                 sent += read;
             }
         }
-        if (Files.size(target) != fileSize || !Files.getLastModifiedTime(target).equals(lastModified)) {
-            throw new IOException("Shared file changed during transfer.");
+        var current = Files.readAttributes(target, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        if (!current.isRegularFile() || current.size() != fileSize
+                || !current.lastModifiedTime().equals(initial.lastModifiedTime())
+                || !Objects.equals(current.fileKey(), initial.fileKey())) {
+            Protocol.writeLine(out, Protocol.STATUS_ERROR + " Shared file changed during transfer. Refresh and try again.");
+            return;
         }
-        out.flush();
+        Protocol.writeLine(out, Protocol.STATUS_COMPLETE);
     }
 
-    private static String checksum(Path file) throws IOException {
+    private static String checksum(Path file, long size) throws IOException {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (InputStream in = Files.newInputStream(file)) {
+            try (InputStream in = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
                 byte[] bytes = new byte[8192];
-                int read;
-                while ((read = in.read(bytes)) != -1) digest.update(bytes, 0, read);
+                long remaining = size;
+                while (remaining > 0) {
+                    int read = in.read(bytes, 0, (int) Math.min(bytes.length, remaining));
+                    if (read == -1) throw new IOException("Shared file changed before transfer.");
+                    digest.update(bytes, 0, read);
+                    remaining -= read;
+                }
             }
             return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException e) {

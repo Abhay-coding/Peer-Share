@@ -12,12 +12,15 @@ import com.peershare.service.TransferService;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.FileSystems;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
@@ -29,6 +32,7 @@ public final class TransferServiceTest {
 
     public static void run() throws Exception {
         testSuccessfulDownload();
+        testDownloadOnFilesystemWithoutHardLinks();
         testSavedDownloadSurvivesHistoryFailure();
         testUnsafeFileNameDownloadFailure();
         testMissingFileDownloadFailure();
@@ -72,6 +76,29 @@ public final class TransferServiceTest {
             TestSupport.assertEquals("Alice", record.peerName(), "History must record peer name.");
             TestSupport.assertEquals("SUCCESS", record.status(), "History status must be SUCCESS.");
             TestSupport.assertTrue(record.downloadedAt() != null, "downloadedAt must not be null.");
+        } finally {
+            server.stop();
+        }
+    }
+
+    private static void testDownloadOnFilesystemWithoutHardLinks() throws Exception {
+        Path fixture = Files.createTempDirectory("peershare-no-hardlinks");
+        Path shared = Files.createDirectory(fixture.resolve("shared"));
+        Files.writeString(shared.resolve("sample.txt"), "fallback contents");
+        DatabaseManager manager = new DatabaseManager(fixture.resolve("peershare.db"));
+        manager.initialize();
+        PeerServer server = new PeerServer(0, shared);
+        server.start();
+        URI archive = URI.create("jar:" + fixture.resolve("downloads.zip").toUri());
+        try (var filesystem = FileSystems.newFileSystem(archive, Map.of("create", "true"))) {
+            Path downloads = Files.createDirectory(filesystem.getPath("/downloads"));
+            var service = new TransferService(downloads, new DownloadHistoryDao(manager), new FileTransferClient());
+            var peer = new Peer(1, "Local", "127.0.0.1", server.port());
+            Path saved = service.download(peer, "sample.txt");
+            TestSupport.assertEquals("fallback contents", Files.readString(saved), "The verified bytes must save without hard links.");
+            try (var entries = Files.list(downloads)) {
+                TestSupport.assertEquals(List.of(saved), entries.toList(), "The temporary file must be removed.");
+            }
         } finally {
             server.stop();
         }
@@ -220,6 +247,7 @@ public final class TransferServiceTest {
                     Files.writeString(destination, "keep this");
                     Protocol.writeLine(client.getOutputStream(), "OK " + bytes.length + " " + checksum);
                     client.getOutputStream().write(bytes);
+                    Protocol.writeLine(client.getOutputStream(), Protocol.STATUS_COMPLETE);
                 }
                 return null;
             });

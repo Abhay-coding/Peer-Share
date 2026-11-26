@@ -7,6 +7,7 @@ import com.peershare.dao.SharedFileDao;
 import com.peershare.db.DatabaseManager;
 import com.peershare.network.FileTransferClient;
 import com.peershare.network.PeerServer;
+import com.peershare.network.PeerTls;
 import com.peershare.service.FileScanner;
 import com.peershare.service.TransferService;
 import com.peershare.ui.MainView;
@@ -15,6 +16,9 @@ import javafx.application.Application;
 import javafx.scene.Scene;
 import javafx.stage.Stage;
 
+import javax.net.ssl.SSLContext;
+import java.io.IOException;
+import java.net.BindException;
 import java.nio.file.Path;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -30,6 +34,8 @@ public final class MainApp extends Application {
     private AppConfig config;
     private DatabaseManager databaseManager;
     private PeerServer peerServer;
+    private SSLContext lanSecurity;
+    private String sharingStatus = "";
 
     @Override
     public void init() throws Exception {
@@ -43,10 +49,31 @@ public final class MainApp extends Application {
         databaseManager.initialize();
         LOGGER.info("SQLite database initialized at: " + config.databasePath());
 
-        // 3. Start background TCP server
-        peerServer = new PeerServer(config);
-        peerServer.start();
-        LOGGER.info("PeerServer listening on port: " + peerServer.port());
+        String password = System.getenv("PEERSHARE_TLS_PASSWORD");
+        if (password != null && !password.isBlank()) {
+            Path keys = config.projectRoot().resolve(".peershare-tls");
+            try {
+                lanSecurity = PeerTls.load(keys.resolve("identity.p12"), keys.resolve("trusted.p12"), password.toCharArray());
+            } catch (IOException ex) {
+                LOGGER.log(Level.WARNING, "LAN certificates unavailable", ex);
+            }
+        }
+
+        if (!config.sharingEnabled()) {
+            sharingStatus = "Receive only";
+        } else if (!config.bindAddress().equals("127.0.0.1") && lanSecurity == null) {
+            sharingStatus = "Set up LAN certificates first.";
+        } else {
+            peerServer = new PeerServer(config, lanSecurity);
+            try {
+                peerServer.start();
+            } catch (IOException ex) {
+                sharingStatus = ex instanceof BindException ? "Port " + config.serverPort() + " is unavailable."
+                        : "Couldn’t start the sharing server.";
+                LOGGER.log(Level.WARNING, sharingStatus, ex);
+                peerServer = null;
+            }
+        }
     }
 
     @Override
@@ -58,7 +85,7 @@ public final class MainApp extends Application {
 
         // Instantiate Services
         FileScanner fileScanner = new FileScanner(config);
-        FileTransferClient client = new FileTransferClient();
+        FileTransferClient client = new FileTransferClient(lanSecurity);
         TransferService transferService = new TransferService(config, historyDao, client);
 
         // Build User Interface
@@ -70,7 +97,8 @@ public final class MainApp extends Application {
                 fileScanner,
                 transferService,
                 client,
-                peerServer
+                peerServer,
+                sharingStatus
         );
 
         Scene scene = new Scene(mainView, 1040, 680);

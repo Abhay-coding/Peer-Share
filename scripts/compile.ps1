@@ -1,3 +1,5 @@
+param([switch]$AppOnly)
+
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $projectRoot
 
@@ -13,7 +15,7 @@ if (-not $env:JAVA_HOME) {
     }
 }
 
-New-Item -ItemType Directory -Force 'out\main', 'out\test' | Out-Null
+New-Item -ItemType Directory -Force 'out\main' | Out-Null
 $javac = Join-Path $env:JAVA_HOME 'bin\javac.exe'
 
 $libJars = @(Get-ChildItem -Path 'lib' -Filter '*.jar' -ErrorAction SilentlyContinue | ForEach-Object FullName)
@@ -31,8 +33,11 @@ if ($mainSources) {
 
 Copy-Item -Path 'src\main\resources\*' -Destination 'out\main' -Recurse -Force -ErrorAction Stop
 
+if ($AppOnly) { return }
+
 $testSources = Get-ChildItem -Recurse 'src\test\java' -Filter '*.java' | ForEach-Object FullName
 if ($testSources) {
+    New-Item -ItemType Directory -Force 'out\test' | Out-Null
     $testCp = if ($extraCp) { "out\main;$extraCp" } else { "out\main" }
     & $javac --release 17 -cp $testCp -d out\test $testSources
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

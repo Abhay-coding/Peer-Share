@@ -6,6 +6,7 @@ import com.peershare.network.FileTransferClient;
 import com.peershare.network.PeerServer;
 import com.peershare.network.Protocol;
 
+import javax.net.ssl.SSLContext;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.InetAddress;
@@ -30,13 +31,15 @@ public final class NetworkTransferTest {
         testExtraDownloadBytes();
         testTruncatedDownload();
         testWrongChecksum();
+        testMissingCompletionIsRejected();
         testListedSizeChanged();
         testStopClosesConnectedClient();
         testConnectionLimit();
+        testSecureConnectionLimitPerAddress();
         testOversizedFileIsNotListed();
         testFileListRequestDeadline();
         testProtocolLimitCountsAllBytes();
-        testPeerReportsFileListLimit();
+        testPeerReturnsUsableFileListAtLimit();
         testPlaceholderIsNotShared();
     }
 
@@ -186,6 +189,12 @@ public final class NetworkTransferTest {
         expectBadDownload("OK 3 " + "0".repeat(64) + "\nabc", 3, "checksum does not match");
     }
 
+    private static void testMissingCompletionIsRejected() throws Exception {
+        String header = "OK 3 ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\n";
+        expectBadDownload(header + "abc", 3, "didn’t confirm");
+        expectBadDownload(header + "abcERROR Shared file changed during transfer\n", 3, "couldn’t confirm");
+    }
+
     private static void testListedSizeChanged() throws Exception {
         expectBadDownload("OK 3 ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\nabc",
                 4, "File size changed");
@@ -271,7 +280,22 @@ public final class NetworkTransferTest {
         }
     }
 
-    private static void testPeerReportsFileListLimit() throws Exception {
+    private static void testSecureConnectionLimitPerAddress() throws Exception {
+        Path shared = Files.createTempDirectory("peershare-per-peer-cap");
+        PeerServer server = new PeerServer(0, shared, "127.0.0.1", SSLContext.getDefault());
+        server.start();
+        try (Socket first = new Socket("127.0.0.1", server.port());
+             Socket second = new Socket("127.0.0.1", server.port());
+             Socket extra = new Socket("127.0.0.1", server.port())) {
+            extra.setSoTimeout(2000);
+            TestSupport.assertEquals(-1, extra.getInputStream().read(),
+                    "One address must not use all the secure listener's connection slots.");
+        } finally {
+            server.stop();
+        }
+    }
+
+    private static void testPeerReturnsUsableFileListAtLimit() throws Exception {
         Path shared = Files.createTempDirectory("peershare-list-limit");
         for (int i = 0; i <= Protocol.MAX_LIST_FILES; i++) {
             Files.createFile(shared.resolve("sample-" + i + ".txt"));
@@ -280,10 +304,9 @@ public final class NetworkTransferTest {
         server.start();
         try {
             Peer peer = new Peer(1, "Local", "127.0.0.1", server.port());
-            new FileTransferClient().listRemoteFiles(peer);
-            throw new AssertionError("A peer with too many files must reject the list request.");
-        } catch (FileTransferClient.ListRejectedException ex) {
-            TestSupport.assertTrue(ex.fileLimitExceeded(), "A peer rejection must retain the file limit reason.");
+            var listed = new FileTransferClient().browseRemoteFiles(peer);
+            TestSupport.assertEquals(Protocol.MAX_LIST_FILES, listed.files().size(), "The capped list must still be usable.");
+            TestSupport.assertEquals(1, listed.omitted(), "The receiver must know when the list is incomplete.");
         } finally {
             server.stop();
         }

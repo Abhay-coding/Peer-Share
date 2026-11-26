@@ -32,7 +32,8 @@ public final class MainView extends BorderPane {
 
     public MainView(AppConfig config, PeerDao peerDao, SharedFileDao sharedFileDao,
                     DownloadHistoryDao historyDao, FileScanner fileScanner,
-                    TransferService transferService, FileTransferClient client, PeerServer peerServer) {
+                    TransferService transferService, FileTransferClient client, PeerServer peerServer,
+                    String sharingStatus) {
         getStyleClass().add("app-shell");
         getStylesheets().add(MainView.class.getResource("peershare.css").toExternalForm());
         sidebar.getStyleClass().add("sidebar");
@@ -71,10 +72,12 @@ public final class MainView extends BorderPane {
 
         Region spacer = new Region();
         VBox.setVgrow(spacer, Priority.ALWAYS);
-        String access = peerServer.bindAddress().equals("127.0.0.1") ? "This computer only" : "Local network";
+        String access = peerServer == null ? sharingStatus
+                : peerServer.bindAddress().equals("127.0.0.1") ? "This computer only" : "Paired LAN peers";
         Label address = ViewParts.label(access, "network-detail");
         address.setWrapText(true);
-        VBox network = new VBox(5, ViewParts.label("Sharing on port " + peerServer.port(), "network-title"), address);
+        String sharingTitle = peerServer == null ? "Sharing off" : "Sharing on port " + peerServer.port();
+        VBox network = new VBox(5, ViewParts.label(sharingTitle, "network-title"), address);
         network.getStyleClass().add("network");
         sidebar.getChildren().addAll(spacer, network);
         selectPage(0);
